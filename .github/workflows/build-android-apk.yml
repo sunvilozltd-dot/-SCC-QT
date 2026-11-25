@@ -78,7 +78,10 @@ jobs:
         working-directory: android
         env:
           APPS_SCRIPT_WEBAPP_URL: ${{ github.event.inputs.apps_script_webapp_url }}
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          echo "Kotlin source files:"
+          find app/src/main/java -name '*.kt' | sort
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
 
       - name: Verify APK signature with apksigner
         shell: bash

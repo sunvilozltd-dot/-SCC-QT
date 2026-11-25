@@ -57,9 +57,10 @@ class MainActivity : FragmentActivity() {
     private val secondaryAuthLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
+        val intentData = result.data
+        if (result.resultCode == RESULT_OK && intentData != null) {
             runCatching {
-                val authRes = vm.backupManager.authorizationClient().getAuthorizationResultFromIntent(result.data)
+                val authRes = vm.backupManager.authorizationClient().getAuthorizationResultFromIntent(intentData)
                 authRes.accessToken?.let { vm.onSecondaryGoogleAuthorized(it) }
             }
         }
