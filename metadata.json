@@ -1,0 +1,6 @@
+{
+  "name": "SUNVILOZ Clean Care — অর্ডার ম্যানেজমেন্ট",
+  "description": "পানির ট্যাংক ও পাইপলাইন পরিষ্কারের অর্ডার, কাস্টমাইজড ফলোআপ ও Gmail রিমাইন্ডার ব্যবস্থাপনার জন্য ব্যক্তিগত Google Apps Script ওয়েব অ্যাপ।",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

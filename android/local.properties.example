@@ -1,0 +1,6 @@
+# Copy this file to local.properties in Android Studio (do NOT commit secrets)
+# sdk.dir=/Users/yourname/Library/Android/sdk
+
+# Optional default Apps Script Web App URL (can also be entered inside the app on first launch)
+# Never put passwords, password hashes, or backup bridge secrets in this file.
+APPS_SCRIPT_WEBAPP_URL=

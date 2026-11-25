@@ -1,0 +1,53 @@
+name: Build SUNVILOZ Clean Care Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps_script_webapp_url:
+        description: "Optional default Apps Script Web App /exec URL (leave blank to configure on first launch)"
+        required: false
+        default: ""
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35 & Build Tools 35.0.0
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Ensure Gradle wrapper is executable
+        run: |
+          sed -i 's/\r$//' android/gradlew
+          chmod +x android/gradlew
+
+      - name: Build Debug APK
+        working-directory: android
+        env:
+          APPS_SCRIPT_WEBAPP_URL: ${{ github.event.inputs.apps_script_webapp_url }}
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK signature with apksigner
+        run: |
+          "${ANDROID_HOME}/build-tools/35.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/debug/app-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk SUNVILOZ-Clean-Care.apk
+
+      - name: Upload SUNVILOZ-Clean-Care.apk Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SUNVILOZ-Clean-Care-Debug-APK
+          path: SUNVILOZ-Clean-Care.apk
+          retention-days: 30
