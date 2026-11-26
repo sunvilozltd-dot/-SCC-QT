@@ -79,8 +79,16 @@ jobs:
         env:
           APPS_SCRIPT_WEBAPP_URL: ${{ github.event.inputs.apps_script_webapp_url }}
         run: |
+          set -euo pipefail
           echo "Kotlin source files:"
           find app/src/main/java -name '*.kt' | sort
+          KT_COUNT=$(find app/src/main/java -name '*.kt' | wc -l)
+          echo "Total Kotlin files found: $KT_COUNT"
+          if [ ! -f app/src/main/java/com/sunviloz/cleancare/data/model/Models.kt ]; then
+            echo "ERROR: android/app/src/main/java/com/sunviloz/cleancare/data/model/Models.kt is missing in this GitHub commit!"
+            echo "Make sure .gitignore does not ignore data/ and push again from AI Studio."
+            exit 1
+          fi
           ./gradlew :app:assembleDebug --no-daemon --console=plain
 
       - name: Verify APK signature with apksigner
