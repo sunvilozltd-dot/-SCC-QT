@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   Upload,
 } from 'lucide-react';
-import { api } from '../services/apiClient';
+import { api, isAppsScriptRuntime } from '../services/apiClient';
 import {
   connectSecondaryGoogleDrive,
   disconnectSecondaryGoogleDrive,
@@ -50,8 +50,12 @@ export function BackupRestoreSection({
   onRefreshBootstrap,
   onNotify,
 }: BackupRestoreSectionProps) {
+  const inGasRuntime = isAppsScriptRuntime();
   const [driveConnected, setDriveConnected] = useState(
-    () => getSecondaryDriveMemorySession().connected
+    () =>
+      inGasRuntime
+        ? Boolean(settings.secondary_drive_webapp_url)
+        : getSecondaryDriveMemorySession().connected
   );
   const [connectedEmail, setConnectedEmail] = useState(
     () => getSecondaryDriveMemorySession().email || settings.secondary_drive_email || ''
@@ -90,22 +94,30 @@ export function BackupRestoreSection({
     setAutoEnabled(Boolean(settings.auto_backup_enabled));
     setAutoHour(String(settings.auto_backup_hour ?? 2));
     setSecondaryWebappUrl(settings.secondary_drive_webapp_url || '');
+    if (inGasRuntime) {
+      setDriveConnected(Boolean(settings.secondary_drive_webapp_url));
+    }
     if (settings.secondary_drive_folder_name) {
       setFolderName(settings.secondary_drive_folder_name);
     }
     if (settings.secondary_drive_email && !connectedEmail) {
       setConnectedEmail(settings.secondary_drive_email);
     }
-  }, [settings, connectedEmail]);
+  }, [settings, connectedEmail, inGasRuntime]);
 
   const refreshDriveFiles = async (folderId?: string, fName?: string) => {
     setLoadingFiles(true);
     try {
-      const res = await listSecondaryDriveBackups(
-        folderId || settings.secondary_drive_folder_id || undefined,
-        fName || folderName
-      );
-      setDriveFiles(res.files);
+      if (inGasRuntime) {
+        const res = await api.listSecondaryDriveGasBackups();
+        setDriveFiles(res.files || []);
+      } else {
+        const res = await listSecondaryDriveBackups(
+          folderId || settings.secondary_drive_folder_id || undefined,
+          fName || folderName
+        );
+        setDriveFiles(res.files);
+      }
     } catch (err) {
       onNotify(
         err instanceof Error ? err.message : 'Could not load Secondary Drive backups.',
@@ -152,6 +164,25 @@ export function BackupRestoreSection({
 
   const handleBackupNowToDrive = async () => {
     setBackingUpDrive(true);
+    if (inGasRuntime) {
+      try {
+        const res = await api.runScheduledBackupNow();
+        await onRefreshBootstrap();
+        if (settings.secondary_drive_webapp_url) {
+          await refreshDriveFiles();
+        }
+        onNotify(res.message || 'Verified backup saved to Secondary Google Drive.', 'success');
+      } catch (err) {
+        onNotify(
+          err instanceof Error ? err.message : 'Backup to Secondary Google Drive failed.',
+          'error'
+        );
+      } finally {
+        setBackingUpDrive(false);
+      }
+      return;
+    }
+
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const fileName = `sunviloz_backup_${getTodayDhakaIso()}_${stamp}.json`;
     try {
@@ -288,7 +319,9 @@ export function BackupRestoreSection({
 
   const handleSelectDriveFileForRestore = async (file: SecondaryDriveFileItem) => {
     try {
-      const parsed = await downloadSecondaryDriveBackup(file.id);
+      const parsed = inGasRuntime
+        ? (await api.downloadSecondaryDriveGasBackup(file.id)).backup
+        : await downloadSecondaryDriveBackup(file.id);
       await validateRestorePackage(parsed, `Secondary Drive: ${file.name}`);
     } catch (err) {
       onNotify(
@@ -354,15 +387,21 @@ export function BackupRestoreSection({
                   <RefreshCw className={`h-3.5 w-3.5 ${loadingFiles ? 'animate-spin' : ''}`} />
                   Refresh Files
                 </button>
-                <button
-                  type="button"
-                  onClick={handleDisconnectDrive}
-                  className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Disconnect
-                </button>
+                {!inGasRuntime && (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectDrive}
+                    className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Disconnect
+                  </button>
+                )}
               </>
+            ) : inGasRuntime ? (
+              <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
+                Configure Secondary Drive Webhook URL below
+              </span>
             ) : (
               <button
                 type="button"
@@ -527,12 +566,25 @@ export function BackupRestoreSection({
         </div>
 
         <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-[11px] text-amber-950">
-          <strong>Important Scheduling &amp; Storage Note:</strong> Server-scheduled daily backups
-          depend on an active running server process (or an external scheduled cron job triggering
-          backups). For production deployments, point{' '}
-          <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">DB_PATH</code> to a
-          persistent mounted volume so your SQLite database survives restarts and redeployments.
-          Failed backup runs never replace the last verified backup.
+          {inGasRuntime ? (
+            <>
+              <strong>Google Apps Script Daily Backup:</strong> Daily automatic backups run via your
+              Apps Script time-driven trigger (installed by{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">
+                provisionWorkspaceAndTriggers
+              </code>
+              ). Every run saves a verified snapshot to Primary Drive and, when configured below,
+              pushes a copy to your independent Secondary Google Drive bridge. Failed runs never
+              overwrite the last verified backup.
+            </>
+          ) : (
+            <>
+              <strong>Scheduling &amp; Storage Note:</strong> In Google Apps Script production mode,
+              daily backups run via Apps Script triggers directly from Google Sheets &amp; Drive. In
+              local preview mode, backups are saved locally and optionally pushed to your Secondary
+              Drive bridge. Failed runs never replace the last verified backup.
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

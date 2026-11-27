@@ -12,7 +12,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
-import { api } from '../services/apiClient';
+import { api, isAppsScriptRuntime } from '../services/apiClient';
 import {
   clearPrimaryDriveMemorySession,
   connectPrimaryGoogleDrive,
@@ -43,8 +43,9 @@ export function PrimaryDriveSection({
   onBootstrapUpdated,
   onNotify,
 }: PrimaryDriveSectionProps) {
+  const inGasRuntime = isAppsScriptRuntime();
   const [browserConnected, setBrowserConnected] = useState(
-    () => getPrimaryDriveMemorySession().connected
+    () => inGasRuntime || getPrimaryDriveMemorySession().connected
   );
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -56,7 +57,7 @@ export function PrimaryDriveSection({
     remoteModifiedTime: string;
   } | null>(null);
 
-  // Explicit confirmation dialog state before overwriting local SQLite from Primary Drive
+  // Explicit confirmation dialog state before overwriting workspace from Primary Drive
   const [pendingLoadFile, setPendingLoadFile] = useState<PrimaryDriveVersionFile | null>(null);
   const [pendingLoadSnapshot, setPendingLoadSnapshot] = useState<Record<string, unknown> | null>(
     null
@@ -64,16 +65,17 @@ export function PrimaryDriveSection({
   const [confirmLoadText, setConfirmLoadText] = useState('');
   const [loadingRemote, setLoadingRemote] = useState(false);
 
-  useEffect(() => {
-    setBrowserConnected(getPrimaryDriveMemorySession().connected);
-  }, [settings.primary_drive_email]);
-
   const refreshVersions = async () => {
-    if (!getPrimaryDriveMemorySession().connected) return;
+    if (!inGasRuntime && !getPrimaryDriveMemorySession().connected) return;
     setLoadingVersions(true);
     try {
-      const files = await listPrimaryDriveVersions();
-      setVersions(files);
+      if (inGasRuntime) {
+        const res = await api.listPrimaryDriveGasSnapshots();
+        setVersions(res.versions || []);
+      } else {
+        const files = await listPrimaryDriveVersions();
+        setVersions(files);
+      }
     } catch (err) {
       onNotify(
         err instanceof Error ? err.message : 'Failed to list Primary Drive versions.',
@@ -83,6 +85,13 @@ export function PrimaryDriveSection({
       setLoadingVersions(false);
     }
   };
+
+  useEffect(() => {
+    setBrowserConnected(inGasRuntime || getPrimaryDriveMemorySession().connected);
+    if (inGasRuntime) {
+      void refreshVersions();
+    }
+  }, [settings.primary_drive_email, inGasRuntime]);
 
   const handleConnectPrimaryDrive = async () => {
     setConnecting(true);
@@ -118,6 +127,7 @@ export function PrimaryDriveSection({
   };
 
   const handleDisconnectPrimaryDrive = async () => {
+    if (inGasRuntime) return;
     clearPrimaryDriveMemorySession();
     setBrowserConnected(false);
     setVersions([]);
@@ -132,6 +142,21 @@ export function PrimaryDriveSection({
   };
 
   const handleSyncNow = async (forceOverwrite = false) => {
+    if (inGasRuntime) {
+      setSyncing(true);
+      try {
+        const res = await api.savePrimaryDriveGasSnapshot();
+        await onBootstrapUpdated();
+        await refreshVersions();
+        onNotify(res.message || 'Verified snapshot saved to Primary Google Drive.', 'success');
+      } catch (err) {
+        onNotify(err instanceof Error ? err.message : 'Primary Drive snapshot failed.', 'error');
+      } finally {
+        setSyncing(false);
+      }
+      return;
+    }
+
     if (!getPrimaryDriveMemorySession().connected) {
       onNotify('Authorize your Primary Google Drive session first.', 'error');
       return;
@@ -190,10 +215,19 @@ export function PrimaryDriveSection({
   const handlePrepareLoadVersion = async (versionFile: PrimaryDriveVersionFile) => {
     setLoadingRemote(true);
     try {
-      const snapshot = await downloadPrimaryDriveSnapshot(versionFile.id);
-      setPendingLoadFile(versionFile);
-      setPendingLoadSnapshot(snapshot);
-      setConfirmLoadText('');
+      if (inGasRuntime) {
+        setPendingLoadFile(versionFile);
+        setPendingLoadSnapshot({
+          sync_revision: versionFile.revision,
+          exported_at: versionFile.modifiedTime,
+        });
+        setConfirmLoadText('');
+      } else {
+        const snapshot = await downloadPrimaryDriveSnapshot(versionFile.id);
+        setPendingLoadFile(versionFile);
+        setPendingLoadSnapshot(snapshot);
+        setConfirmLoadText('');
+      }
     } catch (err) {
       onNotify(
         err instanceof Error ? err.message : 'Failed to download snapshot from Primary Drive.',
@@ -210,11 +244,13 @@ export function PrimaryDriveSection({
     }
     setLoadingRemote(true);
     try {
-      const res = await api.restoreFromPrimaryDrive({
-        snapshot: pendingLoadSnapshot,
-        file_id: pendingLoadFile.id,
-        email: getPrimaryDriveMemorySession().email || settings.primary_drive_email,
-      });
+      const res = inGasRuntime
+        ? await api.restorePrimaryDriveGasSnapshot(pendingLoadFile.id)
+        : await api.restoreFromPrimaryDrive({
+            snapshot: pendingLoadSnapshot,
+            file_id: pendingLoadFile.id,
+            email: getPrimaryDriveMemorySession().email || settings.primary_drive_email,
+          });
       setPendingLoadFile(null);
       setPendingLoadSnapshot(null);
       setConfirmLoadText('');
@@ -284,7 +320,11 @@ export function PrimaryDriveSection({
                   className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F766E] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#0c6059] disabled:opacity-50"
                 >
                   <CloudUpload className={`h-4 w-4 ${syncing ? 'animate-pulse' : ''}`} />
-                  {syncing ? 'Syncing to Drive...' : 'Sync Now to Primary Drive'}
+                  {syncing
+                    ? 'Saving Snapshot...'
+                    : inGasRuntime
+                    ? 'Save Snapshot to Primary Drive'
+                    : 'Sync Now to Primary Drive'}
                 </button>
                 <button
                   type="button"
@@ -295,14 +335,16 @@ export function PrimaryDriveSection({
                   <RefreshCw className={`h-3.5 w-3.5 ${loadingVersions ? 'animate-spin' : ''}`} />
                   Check Versions
                 </button>
-                <button
-                  type="button"
-                  onClick={handleDisconnectPrimaryDrive}
-                  className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Disconnect
-                </button>
+                {!inGasRuntime && (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectPrimaryDrive}
+                    className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Disconnect
+                  </button>
+                )}
               </>
             ) : (
               <button
@@ -327,10 +369,12 @@ export function PrimaryDriveSection({
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="text-slate-500">Primary Google Account</div>
             <div className="mt-0.5 truncate font-mono font-semibold text-[#0B1F3A]">
-              {settings.primary_drive_email || 'Not connected'}
+              {settings.primary_drive_email || (inGasRuntime ? 'Owner Google Account' : 'Not connected')}
             </div>
             <div className="mt-0.5 text-[11px] text-slate-500">
-              {browserConnected
+              {inGasRuntime
+                ? 'Connected natively via Apps Script'
+                : browserConnected
                 ? 'Active browser authorization'
                 : settings.primary_drive_email
                 ? 'Click Reconnect to sync from this browser'

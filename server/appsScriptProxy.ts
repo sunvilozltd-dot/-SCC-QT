@@ -1,8 +1,8 @@
 /**
  * Google Apps Script Backend Proxy Client (server/appsScriptProxy.ts)
  *
- * When APPS_SCRIPT_WEBAPP_URL is configured, routes authentication & status checks
- * to the exact same Google Apps Script Web App backend used by the native Android app.
+ * When APPS_SCRIPT_WEBAPP_URL is configured in local preview, routes authentication
+ * & status checks to your deployed Google Apps Script Web App.
  *
  * Strictly distinguishes:
  * - BACKEND_UNCONFIGURED / BACKEND_UNREACHABLE / BACKEND_SETUP_REQUIRED (HTTP 503)

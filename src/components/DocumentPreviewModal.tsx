@@ -45,6 +45,7 @@ import {
   translateServiceToEnglish,
 } from '../utils/dateAndPhone';
 import { exportA4ElementsToPdf, shareDocumentPdf } from '../utils/pdfExport';
+import { resolveBrandAsset } from '../utils/brandAssets';
 
 interface DocumentPreviewModalProps {
   open: boolean;
@@ -969,7 +970,7 @@ export function DocumentPreviewModal({
           src={
             activePad && activePad.image_data_url
               ? activePad.image_data_url
-              : '/assets/sunviloz/official-quotation-pad.jpg'
+              : resolveBrandAsset('/assets/sunviloz/official-quotation-pad.jpg')
           }
           alt="SUNVILOZ Clean Care Official Letterhead"
           className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
@@ -1143,7 +1144,7 @@ export function DocumentPreviewModal({
             <div className="flex items-start justify-between gap-6 border-b border-slate-200 pb-6">
               <div className="max-w-[430px]">
                 <img
-                  src="/assets/sunviloz/official-logo.png"
+                  src={resolveBrandAsset('/assets/sunviloz/official-logo.png')}
                   alt={COMPANY_NAME}
                   className="h-[64px] w-auto object-contain"
                 />

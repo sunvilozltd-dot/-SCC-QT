@@ -31,6 +31,7 @@ import {
   api,
   clearAuthToken,
   flushPendingMutations,
+  isAppsScriptRuntime,
   OfflineQueuedError,
   setAuthToken,
   setOnSessionRevoked,
@@ -182,8 +183,9 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Register PWA Service Worker
+  // Register PWA Service Worker (when served outside Google Apps Script HTML Service)
   useEffect(() => {
+    if (isAppsScriptRuntime()) return;
     try {
       registerSW({
         immediate: true,
@@ -317,6 +319,7 @@ export function App() {
       : 0;
 
   useEffect(() => {
+    if (isAppsScriptRuntime()) return;
     if (!pendingPrimarySyncRev || !bootstrap) return;
     if (!getPrimaryDriveMemorySession().connected) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
@@ -364,7 +367,7 @@ export function App() {
     setUser(authUser);
     setLockedPreview(null);
     setDeviceUnlockEnrolled(isDeviceEnrolled);
-    setShowEnrollBanner(!isDeviceEnrolled && isWebAuthnSupported());
+    setShowEnrollBanner(!isDeviceEnrolled && !isAppsScriptRuntime() && isWebAuthnSupported());
     if (authUser.role === 'admin') {
       setScreen('dashboard');
       loadAdminBootstrap();

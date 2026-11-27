@@ -2004,74 +2004,12 @@ async function startServer() {
     })
   );
 
-  // Native Android APK & Android Studio Project ZIP artifact endpoints
-  const androidDownloadsDir = path.resolve(process.cwd(), 'public', 'downloads');
-  const androidApkPath = path.join(androidDownloadsDir, 'SUNVILOZ-Clean-Care.apk');
-  const androidProjectZipPath = path.join(
-    androidDownloadsDir,
-    'SUNVILOZ-Clean-Care-Android-Studio-Project.zip'
-  );
-
-  app.get('/api/android/artifacts', (_req, res) => {
-    const apkExists = fs.existsSync(androidApkPath);
-    const zipExists = fs.existsSync(androidProjectZipPath);
-    const apkStat = apkExists ? fs.statSync(androidApkPath) : null;
-    const zipStat = zipExists ? fs.statSync(androidProjectZipPath) : null;
-    const apkSha256 = apkExists
-      ? crypto.createHash('sha256').update(fs.readFileSync(androidApkPath)).digest('hex')
-      : null;
-
-    res.json({
-      applicationId: 'com.sunviloz.cleancare',
-      versionCode: 2,
-      versionName: '1.0.1',
-      minSdk: 26,
-      targetSdk: 35,
-      apk: {
-        available: apkExists,
-        fileName: 'SUNVILOZ-Clean-Care.apk',
-        signingType: 'debug-signed (Test Build)',
-        sizeBytes: apkStat ? apkStat.size : 0,
-        sha256: apkSha256,
-        downloadUrl: apkExists ? '/api/android/download/apk' : null,
-      },
-      projectZip: {
-        available: zipExists,
-        fileName: 'SUNVILOZ-Clean-Care-Android-Studio-Project.zip',
-        sizeBytes: zipStat ? zipStat.size : 0,
-        downloadUrl: zipExists ? '/api/android/download/project-zip' : null,
-      },
-    });
-  });
-
-  app.get('/api/android/download/apk', (_req, res) => {
-    if (!fs.existsSync(androidApkPath)) {
-      res.status(404).json({ error: 'Android APK file has not been generated yet.' });
-      return;
-    }
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader('Content-Disposition', 'attachment; filename="SUNVILOZ-Clean-Care.apk"');
-    res.sendFile(androidApkPath);
-  });
-
-  app.get('/api/android/download/project-zip', (_req, res) => {
-    if (!fs.existsSync(androidProjectZipPath)) {
-      res.status(404).json({ error: 'Android Studio project ZIP is not available yet.' });
-      return;
-    }
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="SUNVILOZ-Clean-Care-Android-Studio-Project.zip"'
-    );
-    res.sendFile(androidProjectZipPath);
-  });
-
-  // Strictly allowlisted list of the 7 Primary Apps Script backend files (never includes SecondaryBackupDrive.gs)
+  // Strictly allowlisted list of the 8 Primary Google Apps Script Web App files
+  // (never includes SecondaryBackupDrive.gs or SETUP_GUIDE.md)
   const primaryAppsScriptFiles: Array<{
     fileName: string;
     editorName: string;
-    kind: 'manifest' | 'script';
+    kind: 'manifest' | 'script' | 'html';
     note: string;
   }> = [
     {
@@ -2084,7 +2022,7 @@ async function startServer() {
       fileName: 'Code.gs',
       editorName: 'Code',
       kind: 'script',
-      note: 'Open the default Code.gs file, select all, delete, and paste this code.',
+      note: 'Open the default Code.gs file, select all, delete, and paste this code (serves Index.html and apiDispatch).',
     },
     {
       fileName: 'Database.gs',
@@ -2114,17 +2052,27 @@ async function startServer() {
       fileName: 'Triggers.gs',
       editorName: 'Triggers',
       kind: 'script',
-      note: 'Click Files (+) → Script → name it "Triggers", then paste. After saving all 7 files, run provisionWorkspaceAndTriggers from this file.',
+      note: 'Click Files (+) → Script → name it "Triggers", then paste. After saving all 8 files, run provisionWorkspaceAndTriggers from this file.',
+    },
+    {
+      fileName: 'Index.html',
+      editorName: 'Index',
+      kind: 'html',
+      note: 'Click Files (+) → HTML → name it "Index", select all, and paste the self-contained web UI bundle.',
     },
   ];
 
-  app.get('/api/android/apps-script-files', (_req, res) => {
+  app.get('/api/apps-script/files', (_req, res) => {
     try {
       const gasDir = path.join(process.cwd(), 'gas');
       const files = primaryAppsScriptFiles.map((meta, idx) => {
         const filePath = path.join(gasDir, meta.fileName);
         if (!fs.existsSync(filePath)) {
-          throw new Error(`Missing Apps Script file: ${meta.fileName}`);
+          throw new Error(
+            meta.fileName === 'Index.html'
+              ? 'Missing gas/Index.html. Run "npm run build:gas" to generate the production Apps Script HTML bundle.'
+              : `Missing Apps Script file: ${meta.fileName}`
+          );
         }
         const content = fs.readFileSync(filePath, 'utf8');
         return {
@@ -2143,8 +2091,10 @@ async function startServer() {
         excludedFiles: ['SecondaryBackupDrive.gs', 'SETUP_GUIDE.md'],
         files,
       });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Unable to load Apps Script source files.' });
+    } catch (err: unknown) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Unable to load Apps Script source files.',
+      });
     }
   });
 

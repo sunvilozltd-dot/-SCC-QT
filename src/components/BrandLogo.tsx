@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveBrandAsset } from '../utils/brandAssets';
 
 interface BrandLogoProps {
   logoDataUrl?: string;
@@ -16,7 +17,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
   const logoSrc =
     logoDataUrl && logoDataUrl.startsWith('data:image/')
       ? logoDataUrl
-      : '/assets/sunviloz/logo.png';
+      : resolveBrandAsset('/assets/sunviloz/logo.png');
 
   if (variant === 'auth') {
     return (

@@ -1,5 +1,0 @@
-<resources>
-    <style name="Theme.SunvilozCleanCare" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#0B1F3A</item>
-    </style>
-</resources>

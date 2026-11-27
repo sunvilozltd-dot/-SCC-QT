@@ -1,11 +1,5 @@
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import * as pdfjsLib from 'pdfjs-dist';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url
-).toString();
 
 export async function convertUploadedPadFileToImage(file: File): Promise<{
   imageDataUrl: string;
@@ -24,6 +18,18 @@ export async function convertUploadedPadFileToImage(file: File): Promise<{
   }
 
   if (mime === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    const pdfjsLib = await import('pdfjs-dist');
+    if (typeof pdfjsLib.getDocument !== 'function') {
+      throw new Error(
+        'PDF pad conversion is not supported in the single-file Apps Script build. Please upload a PNG or JPG letterhead image instead.'
+      );
+    }
+    if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/build/pdf.worker.min.mjs',
+        import.meta.url
+      ).toString();
+    }
     const buffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
     const page = await pdf.getPage(1);

@@ -10,7 +10,7 @@ import {
   Smartphone,
   Trash2,
 } from 'lucide-react';
-import { api } from '../services/apiClient';
+import { api, isAppsScriptRuntime } from '../services/apiClient';
 import {
   getFriendlyDeviceLabel,
   isPlatformAuthenticatorAvailable,
@@ -30,6 +30,7 @@ export function EnrolledDevicesPanel({
   onEnrollmentChanged,
   onCurrentSessionRevoked,
 }: EnrolledDevicesPanelProps) {
+  const inGasRuntime = isAppsScriptRuntime();
   const [devices, setDevices] = useState<EnrolledDeviceInfo[]>([]);
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
   const [currentDeviceEnrolled, setCurrentDeviceEnrolled] = useState(false);
@@ -48,17 +49,19 @@ export function EnrolledDevicesPanel({
       setCurrentDeviceEnrolled(res.currentDeviceEnrolled);
       onEnrollmentChanged?.(res.currentDeviceEnrolled);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Failed to load enrolled devices.', 'error');
+      onNotify(err instanceof Error ? err.message : 'Failed to load active sessions.', 'error');
     } finally {
       setLoading(false);
     }
   }, [onNotify, onEnrollmentChanged]);
 
   useEffect(() => {
-    setWebAuthnReady(isWebAuthnSupported());
-    isPlatformAuthenticatorAvailable().then(setPlatformReady).catch(() => setPlatformReady(false));
+    setWebAuthnReady(!inGasRuntime && isWebAuthnSupported());
+    if (!inGasRuntime) {
+      isPlatformAuthenticatorAvailable().then(setPlatformReady).catch(() => setPlatformReady(false));
+    }
     loadDevices();
-  }, [loadDevices]);
+  }, [loadDevices, inGasRuntime]);
 
   const handleEnrollThisDevice = async () => {
     setEnrolling(true);

@@ -1,84 +1,91 @@
-# SUNVILOZ Clean Care — Native Android & Google Apps Script Setup Guide
+# SUNVILOZ Clean Care — Web App & Google Apps Script Deployment Guide
 
-This project delivers:
-1. **Google Apps Script Backend (`/gas/`)** — Uses **only** the owner's private Google Sheet, private Google Drive folders, Gmail triggers, and Google Apps Script (no external servers, databases, auth services, or schedulers).
-2. **Native Android Studio Project (`/android/`)** — Built in **Kotlin + Jetpack Compose (Material 3)** with Android Keystore session storage, native `BiometricPrompt` unlock (fingerprint / phone screen lock + app-password fallback), Room offline retry queue, native A4 Quotation & Money Receipt PDF generation, Monthly Jobs & Income `.xlsx` export, and Secondary Google Drive Backup & Restore.
-3. **Web Preview Bridge (`/server.ts` & `/src/`)** — Can point to the exact same `APPS_SCRIPT_WEBAPP_URL` as Android.
+SUNVILOZ Clean Care runs in production as a **web-only application** hosted directly on **Google Apps Script (HTML Service + `google.script.run`)**, using your private **Google Sheet** for business records and private **Google Drive** folders for logos, quotation/receipt pads, issued PDFs, and backups.
+
+- **No separate Node/Express server or SQLite database is required in production.**
+- **Users open one web app URL** on phone or desktop and never enter a backend URL into the app.
+- **Browser installation (Add to Home Screen)** works on Android Chrome, iPhone/iPad Safari, and desktop browsers.
 
 ---
 
-## Step 1: Deploy the Primary Google Apps Script Backend
+## Step 1: Build the Self-Contained Web App Bundle (`gas/Index.html`)
 
-Sign in to your **Primary Google Account** (the owner's account that will privately hold the Sheet and Drive files):
+Whenever you update the React UI, rebuild the single-file Apps Script HTML bundle:
 
-1. Open [https://script.google.com](https://script.google.com) and click **New Project**. Name it **SUNVILOZ Clean Care Backend**.
-2. In **Project Settings**, check **Show "appsscript.json" manifest file in editor**.
-3. Copy each file from `/gas/` into the Apps Script project:
-   - `appsscript.json` (replace the manifest)
-   - `Database.gs`
-   - `Auth.gs`
-   - `BusinessLogic.gs`
-   - `BackupRestore.gs`
-   - `Triggers.gs`
+```bash
+npm run build:gas
+```
+
+This compiles the English React/Vite UI into `/gas/Index.html` with all CSS and JS inlined for Google Apps Script `HtmlService`.
+
+---
+
+## Step 2: Deploy the Primary Google Apps Script Web App
+
+Sign in to your **Primary Google Account** (`sunvilozltd@gmail.com`, which will privately own the Google Sheet and Drive folders):
+
+1. Open [https://script.google.com](https://script.google.com) and click **New Project**. Name it **SUNVILOZ Clean Care Web App**.
+2. Go to **Project Settings (⚙️)** and check **Show "appsscript.json" manifest file in editor**.
+3. Return to **Editor (< >)** and copy all **8 files** from `/gas/` into the project:
+   - `appsscript.json` (replace manifest contents)
    - `Code.gs` (replace default `Code.gs`)
+   - `Database.gs` (**Files (+) → Script → Database**)
+   - `Auth.gs` (**Files (+) → Script → Auth**)
+   - `BusinessLogic.gs` (**Files (+) → Script → BusinessLogic**)
+   - `BackupRestore.gs` (**Files (+) → Script → BackupRestore**)
+   - `Triggers.gs` (**Files (+) → Script → Triggers**)
+   - `Index.html` (**Files (+) → HTML → Index**, paste generated `/gas/Index.html`)
+   - *Do NOT paste `SecondaryBackupDrive.gs` into this primary project.*
 4. **Provision the Private Sheet, Drive Folders & Daily Triggers**:
-   - In the Apps Script Editor toolbar, select `provisionWorkspaceAndTriggers` and click **Run**.
-   - Grant the requested Google permissions (Sheets, Drive, **Gmail**, Triggers) under your Primary Google Account.
-   - This creates the private Google Sheet (`SUNVILOZ Clean Care — Master Database (Private)`), private Drive folders (`Logo`, `DocumentPads`, `IssuedPDFs`, `Backups`), and daily `Asia/Dhaka` triggers for Gmail follow-up reminders (9:00 AM) and daily secondary Drive backup (2:00 AM).
-5. **Authorize & Verify Live Email Delivery to `sunvilozltd@gmail.com`**:
-   - In the Apps Script Editor toolbar, select `testRecoveryEmailDelivery` and click **Run**.
-   - Confirm that the `gmail.send` authorization succeeds and that the verification email arrives in `sunvilozltd@gmail.com`. This ensures first-time admin setup codes and Forgot Password recovery codes can be delivered live.
+   - Open `Triggers.gs`, select `provisionWorkspaceAndTriggers`, and click **Run**.
+   - Grant Google permissions (Sheets, Drive, Gmail, Triggers) under your Primary Google Account.
+   - This creates the private Google Sheet (`SUNVILOZ Clean Care — Master Database (Private)`), private Drive folders (`Logo`, `DocumentPads`, `IssuedPDFs`, `Backups`), and daily `Asia/Dhaka` triggers for 9:00 AM follow-up reminders and 2:00 AM backups.
+5. **Verify Live Email Delivery**:
+   - Open `Auth.gs`, select `testRecoveryEmailDelivery`, and click **Run** to confirm Gmail delivery to `sunvilozltd@gmail.com`.
 6. **Deploy as a Web App**:
    - Click **Deploy → New deployment → Web app**.
    - **Execute as:** `Me` (your Primary Google Account).
-   - **Who has access:** `Anyone` (authentication, one-time codes, and admin/supervisor roles are strictly enforced inside `Code.gs`).
-   - Copy the resulting **Web App URL** (`https://script.google.com/macros/s/.../exec`).
-7. **Complete First-Time Admin Setup Inside the Android App**:
-   - Open the Android app, paste the Web App URL under **Configure Backend URL**, and tap **Set Up Admin Account** (visible only while the admin password has never been initialized).
-   - Keep `scc@gmail.com` or edit the Admin Username, enter **New Password** and **Confirm Password** (no Current Password is shown), tap **Send Verification Code to sunvilozltd@gmail.com**, enter the 6-digit code, and save.
-   - Once saved, first-time setup is permanently disabled and existing orders/admin ID (`ADM-PRIMARY`) are preserved.
-   - To update username or password later, use **Settings → Account & Security** (requires Current Password and revokes all previous admin sessions). If you ever forget the admin password, use **Forgot Password?** on the Sign-In screen to receive a 10-minute one-time recovery code at `sunvilozltd@gmail.com`.
+   - **Who has access:** `Anyone` (sign-in, session tokens, one-time codes, and Admin vs. Supervisor permissions are strictly enforced inside `Code.gs` and `Auth.gs`).
+   - Click **Deploy** and bookmark/share the resulting **Web App URL** (`https://script.google.com/macros/s/.../exec`).
+7. **Complete First-Time Admin Setup**:
+   - Open the `/exec` Web App URL in your browser.
+   - Complete the one-time **First-Time Admin Account Setup** using the 6-digit verification code sent to `sunvilozltd@gmail.com` (or run `setupInitialAdmin('your-strong-password')` once in the Apps Script Editor).
+   - First-time setup disables automatically once saved. Future password or username changes are done inside **Settings → Account & Security**, and forgotten admin passwords can be recovered via **Change Password → Forgot Admin Password?**.
 
 ---
 
-## Step 2: Deploy the Secondary Google Drive Daily Backup Bridge
+## Step 3: Optional Secondary Google Drive Daily Backup Bridge
 
-Sign in to your **SECOND (independent) Google Account** (must be different from the Primary account):
+Sign in to a **SECOND (independent) Google Account** (must differ from the Primary account):
 
 1. Open [https://script.google.com](https://script.google.com) → **New Project** → name it **SUNVILOZ Secondary Backup Bridge**.
 2. Paste `/gas/SecondaryBackupDrive.gs` into `Code.gs`.
-3. Run a one-time helper in the Editor to store a strong shared secret (min 12 characters) in Script Properties, then delete the helper:
+3. Run a one-time helper in the Editor to store a strong shared secret (12+ characters) in Script Properties, then delete the helper:
    ```javascript
    function runOnceSetSecret() {
      setBackupSecret('YOUR_STRONG_BRIDGE_SECRET_12_PLUS');
    }
    ```
 4. Click **Deploy → New deployment → Web app** → **Execute as:** `Me` → **Who has access:** `Anyone`.
-5. Copy this Secondary Web App URL and secret into the Android app under **Settings → Backup & Restore → Daily Unattended Scheduled Backup**.
+5. In the SUNVILOZ web app, go to **Settings → Backup & Restore**, enter the Secondary Web App URL and secret (stored privately in Primary Apps Script **Script Properties**), and save.
 
 ---
 
-## Step 3: Build & Install the Native Android App (`/android/`)
+## Step 4: Optional Non-Destructive Migration from Existing SQLite Data
 
-1. Open `/android` in **Android Studio (Ladybug / 2024.2+)** with JDK 17 and Android SDK 35.
-2. Copy `/android/local.properties.example` to `/android/local.properties`, set `sdk.dir`, and optionally set `APPS_SCRIPT_WEBAPP_URL` (or paste it inside the app via **Configure Backend URL** on first launch). Never put passwords or secrets in `local.properties`.
-3. **For Secondary Google Drive OAuth from Android**:
-   - In Google Cloud Console (for your project), enable the **Google Drive API**.
-   - Create an **Android OAuth 2.0 Client ID** with package name `com.sunviloz.cleancare` and your debug/release signing **SHA-1** fingerprint (`./gradlew signingReport`).
-4. Build the installable APK:
-   - Debug APK: `./gradlew assembleDebug` → output in `/android/app/build/outputs/apk/debug/app-debug.apk`
-   - Release APK: `./gradlew assembleRelease` (configure your keystore in Android Studio → **Build → Generate Signed Bundle / APK**).
-5. Install the APK on your Android phone, open the app, paste your Primary Apps Script Web App URL (if not pre-configured), and tap **Set Up Admin Account** to verify via email code (`sunvilozltd@gmail.com`) and set your initial credentials.
+If you previously saved records in a local SQLite database (`data/sunviloz.db`):
+
+1. Run the read-only export script (your existing SQLite file is never modified or deleted):
+   ```bash
+   npm run export:sqlite
+   ```
+2. Check the printed per-table record counts and the generated verified JSON file in `data/sunviloz-sqlite-export-YYYY-MM-DD.json`.
+3. Open your deployed Google Apps Script web app as Admin → **Settings → Backup & Restore → Upload Backup to Restore** → select the exported JSON file → verify the preview record counts match → type `RESTORE` to import atomically into Google Sheets.
 
 ---
 
-## Step 4: Physical Android Phone Verification Checklist
+## Step 5: Add to Home Screen (Phone & Desktop)
 
-Before production rollout, verify on a real Android phone:
-1. **First-Time Admin Setup**: Verify **Set Up Admin Account** appears only before initialization, shows Admin Username (prefilled with `scc@gmail.com`, editable), New Password, and Confirm Password (no Current Password), sends a 6-digit code to `sunvilozltd@gmail.com`, saves credentials while preserving `ADM-PRIMARY` and existing orders, and permanently hides setup afterward.
-2. **Sign In & Device Unlock**: Sign in with the saved admin credentials (verify wrong passwords return `"Invalid username or password."`), close and reopen the app, verify Fingerprint / Screen Lock (`BiometricPrompt`) unlocks the session, and verify `"Sign in with App Password Instead"` works.
-3. **Settings → Account & Security**: Verify saved username is prefilled, wrong Current Password is rejected, blank New Password keeps the existing password, Confirm New Password is required when changing password, and saving revokes all previous admin sessions and returns to Sign In.
-4. **Forgot Password**: Tap **Forgot Password?**, enter the current Admin Username, verify the recovery code arrives at `sunvilozltd@gmail.com`, verify expired/reused codes fail, reset the password while preserving the username and orders, and confirm the old password fails immediately.
-5. **Orders & Offline Sync**: Create an order, verify `"Saved to Google Sheets"`, toggle Airplane Mode, submit another form, verify `"Not Saved"` / `"Pending Sync"` keeps the form open, reconnect, tap **Retry**, and verify no duplicate order is created.
-6. **Status Lock & Supervisor Scope**: Complete an order with full bill collected → verify status permanently locks (`Completed · Locked`); sign in on a second device with a Supervisor account → verify only assigned jobs for today through today + 6 days appear.
-7. **Secondary Google Drive Backup & Restore**: Verify connecting the primary Google account is rejected, connecting a second Google account succeeds, **Back Up Now** creates an actual private JSON file in the second Drive (excluding passwords, hashes, codes, and sessions), and **Preview & Restore** validates and restores cleanly into a fresh Sheet.
+- **Android Phone (Chrome / Edge):** Open your `/exec` Web App URL → tap **⋮ Menu** → **Add to Home screen** (or **Install app**).
+- **iPhone / iPad (Safari):** Open your `/exec` Web App URL → tap **Share** → **Add to Home Screen**.
+- **Desktop (Chrome / Edge):** Bookmark the `/exec` URL or use **Menu → Cast, save, and share → Install page as app**.

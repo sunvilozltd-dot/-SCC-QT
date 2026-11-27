@@ -16,7 +16,7 @@ interface AppsScriptSourceFile {
   order: number;
   fileName: string;
   editorName: string;
-  kind: 'manifest' | 'script';
+  kind: 'manifest' | 'script' | 'html';
   note: string;
   lineCount: number;
   content: string;
@@ -63,7 +63,7 @@ async function copyTextReliably(text: string): Promise<boolean> {
 }
 
 export function AppsScriptSetupHelper({
-  buttonLabel = 'Apps Script Setup (7 Files · 1-Click Copy)',
+  buttonLabel = 'Google Apps Script Deploy (8 Files)',
   variant = 'primary',
   onNotify,
 }: AppsScriptSetupHelperProps) {
@@ -80,7 +80,7 @@ export function AppsScriptSetupHelper({
     let active = true;
     setLoading(true);
     setError('');
-    fetch('/api/android/apps-script-files', { cache: 'no-store' })
+    fetch('/api/apps-script/files', { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -91,8 +91,10 @@ export function AppsScriptSetupHelper({
       .then((payload) => {
         if (active) setData(payload);
       })
-      .catch((err: any) => {
-        if (active) setError(err?.message || 'Failed to load Apps Script source files.');
+      .catch((err: unknown) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Failed to load Apps Script source files.');
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -119,7 +121,7 @@ export function AppsScriptSetupHelper({
   };
 
   const copiedCount = Object.values(copiedSet).filter(Boolean).length;
-  const totalFiles = data?.files.length ?? 7;
+  const totalFiles = data?.files.length ?? 8;
 
   return (
     <>
@@ -150,12 +152,12 @@ export function AppsScriptSetupHelper({
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-teal-400 shrink-0" />
                   <h2 id="apps-script-setup-title" className="text-sm sm:text-base font-bold">
-                    SUNVILOZ Clean Care — Primary Apps Script Setup (7 Files)
+                    SUNVILOZ Clean Care — Google Apps Script Web App Deployment (8 Files)
                   </h2>
                 </div>
                 <p className="text-xs text-slate-300">
                   Primary Account: <strong className="text-white">sunvilozltd@gmail.com</strong> ·
-                  Copy each file in 1 click without opening any ZIP.
+                  Serves the complete web app directly from Google Sheets &amp; Drive — one URL, no external server.
                 </p>
               </div>
               <button
@@ -202,7 +204,7 @@ export function AppsScriptSetupHelper({
                   <li>
                     Open <strong>script.google.com</strong> using <strong>sunvilozltd@gmail.com</strong>{' '}
                     → click <strong>+ New project</strong> → rename to{' '}
-                    <code>SUNVILOZ Clean Care Primary Backend</code>.
+                    <code>SUNVILOZ Clean Care Web App</code>.
                   </li>
                   <li>
                     Go to <strong>Project Settings (⚙️)</strong> → check{' '}
@@ -210,30 +212,28 @@ export function AppsScriptSetupHelper({
                     <strong>Editor (&lt; &gt;)</strong>.
                   </li>
                   <li>
-                    Copy and paste all <strong>7 files below</strong> in order (press{' '}
-                    <strong>Ctrl+S</strong> to save). Do <strong>NOT</strong> add{' '}
-                    <code>SecondaryBackupDrive.gs</code> here.
+                    Copy and paste all <strong>8 files below</strong> in order (including{' '}
+                    <strong>HTML file: Index</strong>) and press <strong>Ctrl+S</strong>. Do{' '}
+                    <strong>NOT</strong> add <code>SecondaryBackupDrive.gs</code> to this primary project.
                   </li>
                   <li>
                     Open <code>Triggers.gs</code> → select{' '}
                     <code>provisionWorkspaceAndTriggers</code> → click <strong>Run</strong> →{' '}
-                    <strong>Review permissions</strong> → <strong>Advanced</strong> →{' '}
-                    <strong>Allow</strong>. Then open <code>Auth.gs</code> → run{' '}
-                    <code>testRecoveryEmailDelivery</code>.
+                    <strong>Review permissions</strong> → <strong>Allow</strong>. Then open{' '}
+                    <code>Auth.gs</code> → run <code>testRecoveryEmailDelivery</code>.
                   </li>
                   <li>
                     Click <strong>Deploy → New deployment → Web app</strong> → set{' '}
                     <strong>Execute as: Me (sunvilozltd@gmail.com)</strong> and{' '}
-                    <strong>Who has access: Anyone</strong> → click <strong>Deploy</strong> → copy the{' '}
-                    <code>/exec</code> Web app URL and paste it into your Android APK&apos;s{' '}
-                    <strong>Configure Backend URL</strong>.
+                    <strong>Who has access: Anyone</strong> → click <strong>Deploy</strong>. Open the
+                    resulting <code>/exec</code> URL in any phone or desktop browser — no backend URL entry needed.
                   </li>
                 </ol>
               </div>
 
               {loading && (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
-                  Loading the 7 Primary Apps Script files...
+                  Loading the 8 Google Apps Script web app files...
                 </div>
               )}
 
@@ -269,7 +269,11 @@ export function AppsScriptSetupHelper({
                                 {file.fileName}
                               </span>
                               <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                                {file.kind === 'manifest' ? 'Manifest' : `Script: ${file.editorName}`}
+                                {file.kind === 'manifest'
+                                  ? 'Manifest'
+                                  : file.kind === 'html'
+                                  ? `HTML: ${file.editorName}`
+                                  : `Script: ${file.editorName}`}
                               </span>
                               <span className="text-[11px] text-slate-400">
                                 {file.lineCount} lines

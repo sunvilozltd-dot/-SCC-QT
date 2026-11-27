@@ -3,7 +3,7 @@
  *
  * Deploy this script under your SECOND (independent) Google account so the primary
  * Apps Script daily scheduler can store actual private dated backup files owned by the
- * second Google account even when the Android phone app is completely closed.
+ * second Google account even when no browser tab is open.
  *
  * Setup:
  * 1. Sign in to your SECOND Google account and open https://script.google.com -> New Project.
@@ -59,12 +59,10 @@ function doPost(e) {
       var backupObj = payload.backup || {};
       var content = JSON.stringify(backupObj, null, 2);
 
-      // Creates a brand-new actual private file owned directly by this second Google account (NOT a shortcut)
       var blob = Utilities.newBlob(content, 'application/json', fileName);
       var created = folder.createFile(blob);
       try { created.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); } catch (err3) {}
 
-      // Read back the saved file to verify integrity before marking success
       var readBack = created.getBlob().getDataAsString('UTF-8');
       var parsedBack = JSON.parse(readBack);
       var verifiedChecksum = '';

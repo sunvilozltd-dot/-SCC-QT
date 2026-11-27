@@ -26,6 +26,10 @@ var SUNVILOZ_CONFIG = {
   ]
 };
 
+/**
+ * Additive-only schema definitions: existing columns stay in their original positions
+ * so pre-existing SUNVILOZ Google Sheets remain 100% compatible without data loss.
+ */
 var SHEET_SCHEMAS = {
   Accounts: [
     'id', 'role', 'name', 'username', 'phone_display', 'password_hash',
@@ -59,21 +63,34 @@ var SHEET_SCHEMAS = {
     'reminder_sent', 'reminder_sent_at', 'reminder_sent_for_date', 'reminder_sent_version',
     'followup_done', 'followup_done_at',
     'is_no_charge_visit', 'parent_order_id', 'complaint_id', 'return_visit_reason',
-    'notes', 'created_at', 'updated_at'
+    'notes', 'created_at', 'updated_at',
+    // Additive v3.2 web parity columns
+    'quotation_id', 'receipt_id', 'previous_order_id', 'previous_work_date',
+    'followup_converted_order_id', 'building_name', 'services_json',
+    'estimated_duration_mins', 'scheduled_end_time', 'instructions',
+    'lead_source', 'referral_contact_type', 'referral_contact_name', 'referral_contact_phone',
+    'is_return_visit', 'supervisor_paid_worker_total', 'return_visit_expenses_total',
+    'settlement_actual_total', 'settlement_remaining', 'settlement_status', 'settlement_note'
   ],
   StatusHistory: [
     'history_id', 'order_id', 'from_status', 'to_status', 'note', 'actor_name', 'created_at'
   ],
   Customers: [
     'customer_id', 'name', 'phone_display', 'phone_e164', 'alt_phone',
-    'address', 'area', 'notes', 'created_at', 'updated_at'
+    'address', 'area', 'notes', 'created_at', 'updated_at',
+    // Additive v3.2
+    'lead_source'
   ],
   Buildings: [
     'building_id', 'customer_id', 'name', 'address', 'area',
     'overhead_tank_count', 'overhead_tank_capacity_liters',
     'reserve_tank_count', 'reserve_tank_capacity_liters',
     'floors', 'caretaker_name', 'caretaker_phone', 'access_notes',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at',
+    // Additive v3.2
+    'maps_url', 'access_instructions', 'overhead_tank_qty', 'overhead_tank_capacity_litres',
+    'overhead_tank_material', 'reserve_tank_qty', 'reserve_tank_capacity_litres',
+    'reserve_tank_material', 'tank_notes'
   ],
   Leads: [
     'lead_id', 'customer_name', 'phone_display', 'phone_e164', 'address', 'area',
@@ -81,45 +98,71 @@ var SHEET_SCHEMAS = {
     'followup_date', 'followup_done', 'followup_done_at',
     'agent_name', 'agent_phone_display', 'agent_note',
     'caretaker_name', 'caretaker_phone_display', 'caretaker_note',
-    'converted_order_id', 'notes', 'created_at', 'updated_at'
+    'converted_order_id', 'notes', 'created_at', 'updated_at',
+    // Additive v3.2
+    'building_org', 'contact_role', 'interested_services_json', 'lead_source',
+    'referral_contact_type', 'followup_version', 'reminder_sent', 'reminder_sent_at',
+    'reminder_sent_for_date', 'reminder_sent_version', 'linked_quotation_id',
+    'agent_phone_e164', 'caretaker_phone_e164'
   ],
   LeadNotes: [
-    'note_id', 'lead_id', 'note', 'actor_name', 'created_at'
+    'note_id', 'lead_id', 'note', 'actor_name', 'created_at',
+    // Additive v3.2
+    'channel'
   ],
   Quotations: [
     'quotation_id', 'quotation_number', 'lead_id', 'customer_id', 'building_id',
     'customer_name', 'phone_display', 'address', 'area',
     'items_json', 'subtotal_bdt', 'discount_bdt', 'total_bdt',
     'valid_until', 'followup_date', 'status', 'converted_order_id',
-    'notes', 'pdf_file_id', 'created_at', 'updated_at'
+    'notes', 'pdf_file_id', 'created_at', 'updated_at',
+    // Additive v3.2
+    'phone_e164', 'quotation_date', 'discount_enabled', 'discount_type', 'discount_value',
+    'vat_enabled', 'vat_type', 'vat_value', 'vat_base', 'vat_bdt',
+    'tax_enabled', 'tax_type', 'tax_value', 'tax_base', 'tax_bdt',
+    'terms', 'lead_source', 'referral_contact_type', 'referral_contact_name',
+    'referral_contact_phone', 'status_changed_at', 'status_history_json',
+    'followup_note', 'followup_done', 'followup_done_at', 'share_url', 'pad_snapshot_json'
   ],
   Receipts: [
     'receipt_id', 'receipt_number', 'order_id', 'customer_name', 'phone_display',
     'address', 'service_type', 'amount_bdt', 'payment_method', 'payment_date',
-    'received_by', 'notes', 'pdf_file_id', 'created_at'
+    'received_by', 'notes', 'pdf_file_id', 'created_at',
+    // Additive v3.2
+    'transaction_ref', 'pad_snapshot_json'
   ],
   Workers: [
     'worker_id', 'name', 'phone_display', 'role_label', 'default_daily_wage_bdt',
-    'is_active', 'notes', 'created_at', 'updated_at'
+    'is_active', 'notes', 'created_at', 'updated_at',
+    // Additive v3.2
+    'phone_e164'
   ],
   OrderWorkers: [
     'assignment_id', 'order_id', 'worker_id', 'worker_name',
     'wage_bdt', 'confirmed', 'paid', 'paid_at', 'paid_by', 'payment_note',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at',
+    // Additive v3.2
+    'paid_amount_bdt', 'payment_date', 'payment_method', 'paid_by_role', 'payment_reference'
   ],
   WorkerPayHistory: [
     'pay_history_id', 'assignment_id', 'order_id', 'worker_id', 'worker_name',
-    'amount_bdt', 'action_type', 'note', 'actor_name', 'created_at'
+    'amount_bdt', 'action_type', 'note', 'actor_name', 'created_at',
+    // Additive v3.2
+    'payment_date', 'payment_method', 'paid_by_role', 'reference'
   ],
   SettlementEntries: [
     'entry_id', 'order_id', 'supervisor_id', 'supervisor_name',
     'amount_bdt', 'direction', 'payment_method', 'entry_date',
-    'note', 'recorded_by', 'created_at'
+    'note', 'recorded_by', 'created_at',
+    // Additive v3.2
+    'entry_type', 'entry_datetime', 'reference'
   ],
   Complaints: [
     'complaint_id', 'order_id', 'customer_name', 'phone_display',
     'description', 'status', 'return_visit_order_id', 'resolution_note',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at',
+    // Additive v3.2
+    'complaint_date', 'action_taken', 'is_no_charge', 'created_by'
   ],
   OverheadExpenses: [
     'expense_id', 'expense_date', 'category', 'description', 'amount_bdt',
@@ -127,7 +170,9 @@ var SHEET_SCHEMAS = {
   ],
   DocumentPads: [
     'pad_type', 'file_name', 'mime_type', 'drive_file_id',
-    'fields_json', 'updated_by', 'updated_at'
+    'fields_json', 'updated_by', 'updated_at',
+    // Additive v3.2
+    'version', 'page_width_mm', 'page_height_mm'
   ],
   IssuedPdfs: [
     'pdf_id', 'doc_type', 'doc_id', 'doc_number', 'file_name',
@@ -135,7 +180,9 @@ var SHEET_SCHEMAS = {
   ],
   ReminderLog: [
     'log_id', 'order_id', 'followup_date', 'followup_version', 'recipient_email',
-    'status', 'error_message', 'sent_at'
+    'status', 'error_message', 'sent_at',
+    // Additive v3.2
+    'dedupe_key', 'customer_name', 'phone_display', 'services_text', 'completion_date', 'send_type'
   ],
   BackupHistory: [
     'backup_id', 'source', 'status', 'file_name', 'drive_file_id',
@@ -282,7 +329,6 @@ function isCompatibleSunvilozSpreadsheet_(ss) {
 function findExistingCompatibleSpreadsheet_(folders) {
   var fallbackSs = null;
 
-  // 1. Check non-trashed files inside the private root folder first
   var folderFiles = folders.root.getFilesByName(SUNVILOZ_CONFIG.SPREADSHEET_NAME);
   while (folderFiles.hasNext()) {
     var f = folderFiles.next();
@@ -294,12 +340,9 @@ function findExistingCompatibleSpreadsheet_(folders) {
         return candidate;
       }
       if (!fallbackSs) fallbackSs = candidate;
-    } catch (err) {
-      // Skip non-spreadsheet or inaccessible file
-    }
+    } catch (err) {}
   }
 
-  // 2. Check anywhere in the primary owner's Drive so an existing compatible database is reused
   if (typeof DriveApp.getFilesByName === 'function') {
     var allFiles = DriveApp.getFilesByName(SUNVILOZ_CONFIG.SPREADSHEET_NAME);
     while (allFiles.hasNext()) {
@@ -314,16 +357,14 @@ function findExistingCompatibleSpreadsheet_(folders) {
           return driveCandidate;
         }
         if (!fallbackSs) fallbackSs = driveCandidate;
-      } catch (err2) {
-        // Skip non-spreadsheet or inaccessible file
-      }
+      } catch (err2) {}
     }
   }
 
   return fallbackSs;
 }
 
-var SCHEMA_VERIFIED_VERSION_ = '3.1';
+var SCHEMA_VERIFIED_VERSION_ = '3.2';
 
 var DATE_ONLY_COLUMNS_ = {
   booking_date: true,
@@ -334,29 +375,35 @@ var DATE_ONLY_COLUMNS_ = {
   valid_until: true,
   expense_date: true,
   payment_date: true,
-  reminder_sent_for_date: true
+  reminder_sent_for_date: true,
+  quotation_date: true,
+  complaint_date: true,
+  previous_work_date: true
 };
 
 var TIME_ONLY_COLUMNS_ = {
-  scheduled_time: true
+  scheduled_time: true,
+  scheduled_end_time: true
 };
 
 var PHONE_DISPLAY_COLUMNS_ = {
   phone_display: true,
-  caretaker_phone: true
+  caretaker_phone: true,
+  agent_phone_display: true,
+  caretaker_phone_display: true,
+  referral_contact_phone: true
 };
 
 var PHONE_E164_COLUMNS_ = {
-  phone_e164: true
+  phone_e164: true,
+  agent_phone_e164: true,
+  caretaker_phone_e164: true
 };
 
 function escapeSheetCellValue_(val) {
   if (val === undefined || val === null) return '';
   if (typeof val !== 'string') return val;
   if (val === '') return '';
-  // Prevent Google Sheets from auto-converting phone numbers ("017..."), "+880...",
-  // ISO dates ("2026-11-25"), times ("10:00"), booleans, or formula prefixes into
-  // numbers, Date objects, or formulas. Sheets natively strips the leading apostrophe on read.
   var ch = val.charAt(0);
   if (
     ch === "'" || ch === '=' || ch === '+' || ch === '-' || ch === '@' ||
@@ -382,7 +429,6 @@ function normalizeReadCellValue_(key, val) {
   if (PHONE_DISPLAY_COLUMNS_[key]) {
     var ps = String(val).trim();
     if (ps === '') return '';
-    // Restore leading '0' if an earlier Sheet write auto-converted a 11-digit BD mobile (01XXXXXXXXX -> 1XXXXXXXXX)
     if (/^1[3-9]\d{8}$/.test(ps)) {
       return '0' + ps;
     }
@@ -408,7 +454,6 @@ function getOrCreateSpreadsheet_(forceEnsureSchema) {
   var schemaVerified = props.getProperty('SCHEMA_VERIFIED_VERSION') === SCHEMA_VERIFIED_VERSION_;
   var ss = null;
 
-  // Fast path for normal API requests: open cached Spreadsheet ID directly without slow DriveApp or 17-sheet scans
   if (ssId && !forceEnsureSchema && schemaVerified) {
     try {
       return SpreadsheetApp.openById(ssId);
@@ -440,7 +485,6 @@ function getOrCreateSpreadsheet_(forceEnsureSchema) {
         folders.root.addFile(file);
         DriveApp.getRootFolder().removeFile(file);
       } catch (err2) {
-        // DriveApp.File.moveTo fallback for newer Drive APIs
         try { file.moveTo(folders.root); } catch (err3) {}
       }
     }
@@ -465,7 +509,8 @@ function ensureAllSheets_(ss) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.setFrozenRows(1);
     } else {
-      var existingHeaders = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getValues()[0];
+      var lastCol = Math.max(sheet.getLastColumn(), 1);
+      var existingHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
       var missing = [];
       for (var c = 0; c < headers.length; c++) {
         if (existingHeaders.indexOf(headers[c]) === -1) {
@@ -475,6 +520,7 @@ function ensureAllSheets_(ss) {
       if (missing.length > 0) {
         var startCol = sheet.getLastColumn() + 1;
         sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
+        if (ss._headerCache) delete ss._headerCache[name];
       }
     }
   }
@@ -621,6 +667,7 @@ function getSettingsMap_(ss) {
     reminder_email: SUNVILOZ_CONFIG.FIXED_RECOVERY_EMAIL,
     primary_owner_google_email: getEffectiveOwnerEmail_() || SUNVILOZ_CONFIG.FIXED_RECOVERY_EMAIL,
     daily_reminder_hour: '9',
+    schedule_conflict_buffer_mins: '30',
     order_sequence: '0',
     quotation_sequence: '0',
     receipt_sequence: '0',
@@ -639,7 +686,10 @@ function getSettingsMap_(ss) {
     last_verified_backup_at: '',
     last_verified_backup_file: '',
     last_backup_error: '',
-    last_auto_backup_date: ''
+    last_auto_backup_date: '',
+    primary_drive_last_snapshot_at: '',
+    primary_drive_last_snapshot_file_id: '',
+    primary_drive_last_checksum: ''
   };
   for (var i = 0; i < rows.length; i++) {
     var k = String(rows[i].key || '').trim();
@@ -672,10 +722,6 @@ function incrementSequence_(ss, settingKey) {
   return next;
 }
 
-/**
- * Atomically increments both a business sequence (e.g. order_sequence) and sync_revision
- * in ONE Settings read/write pass to minimize Google Sheets round-trips.
- */
 function incrementSequenceAndSync_(ss, settingKey) {
   var sheet = ss.getSheetByName('Settings');
   var lastRow = sheet.getLastRow();
@@ -684,7 +730,6 @@ function incrementSequenceAndSync_(ss, settingKey) {
   var headers = values[0];
   var keyIdx = headers.indexOf('key');
   var valIdx = headers.indexOf('value');
-  var updIdx = headers.indexOf('updated_at');
   var now = getNowDhakaTimestamp_();
 
   var seqRowIdx = -1;
@@ -748,6 +793,17 @@ function saveBase64FileToDrive_(folder, fileName, mimeType, base64Data, previous
   };
 }
 
+function readDriveFileAsBase64_(fileId) {
+  if (!fileId) return '';
+  try {
+    var file = DriveApp.getFileById(fileId);
+    if (file.isTrashed()) return '';
+    return Utilities.base64Encode(file.getBlob().getBytes());
+  } catch (err) {
+    return '';
+  }
+}
+
 function readDriveFileAsDataUrl_(fileId, fallbackMime) {
   if (!fileId) return '';
   var cacheKey = 'DRIVE_DATAURL_' + String(fileId);
@@ -798,14 +854,32 @@ function getIdempotentResponse_(ss, requestId, actorId, action) {
 
 function storeIdempotentResponse_(ss, requestId, actorId, action, statusCode, bodyObj) {
   if (!requestId) return;
-  appendSheetObject_(ss, 'RequestLocks', {
-    request_id: String(requestId).slice(0, 120),
-    actor_id: String(actorId || 'anon'),
-    action: String(action || ''),
-    status_code: Number(statusCode || 200),
-    response_json: JSON.stringify(bodyObj || {}),
-    created_at: getNowDhakaTimestamp_()
-  });
+  // Avoid exceeding Google Sheets 50,000-char cell limit by storing a compact cached copy
+  var toStore = bodyObj;
+  try {
+    var serialized = JSON.stringify(bodyObj || {});
+    if (serialized.length > 45000 && bodyObj && bodyObj.data && bodyObj.data.bootstrap) {
+      var shallowData = {};
+      var keys = Object.keys(bodyObj.data);
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k] !== 'bootstrap') shallowData[keys[k]] = bodyObj.data[keys[k]];
+      }
+      shallowData._bootstrapOmitted = true;
+      toStore = { ok: bodyObj.ok, data: shallowData };
+      serialized = JSON.stringify(toStore);
+    }
+    if (serialized.length > 45000) {
+      serialized = JSON.stringify({ ok: Boolean(bodyObj && bodyObj.ok), data: { message: 'Action completed.' } });
+    }
+    appendSheetObject_(ss, 'RequestLocks', {
+      request_id: String(requestId).slice(0, 120),
+      actor_id: String(actorId || 'anon'),
+      action: String(action || ''),
+      status_code: Number(statusCode || 200),
+      response_json: serialized,
+      created_at: getNowDhakaTimestamp_()
+    });
+  } catch (err) {}
 }
 
 function computeSha256Hex_(text) {

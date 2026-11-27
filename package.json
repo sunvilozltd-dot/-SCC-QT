@@ -7,8 +7,10 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
+    "build:gas": "tsx scripts/build-gas-html.ts",
+    "export:sqlite": "tsx scripts/export-sqlite-for-sheets.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist dist-gas server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { Eye, EyeOff, KeyRound, Lock, ShieldCheck, UserCheck } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, Lock, Mail, ShieldCheck, UserCheck } from 'lucide-react';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { api, setAuthToken } from '../services/apiClient';
+import { api, isAppsScriptRuntime, setAuthToken } from '../services/apiClient';
 import { getSecondaryDriveMemorySession } from '../services/secondaryDriveClient';
 import { AuthUser } from '../types/order';
 import { BrandLogo } from './BrandLogo';
@@ -61,11 +61,14 @@ export function AuthGate({
   companyLogoDataUrl = '',
   onAuthenticated,
 }: AuthGateProps) {
+  const inGasRuntime = isAppsScriptRuntime();
   const canUseVerifiedGoogleOwnerReset = Boolean(
-    googleAdminEnabled && ownerEmailHint && ownerEmailHint.includes('@')
+    !inGasRuntime && googleAdminEnabled && ownerEmailHint && ownerEmailHint.includes('@')
   );
   const [authTab, setAuthTab] = useState<'signin' | 'change_password'>('signin');
-  const [changeMode, setChangeMode] = useState<'credentials' | 'google_reset'>('credentials');
+  const [changeMode, setChangeMode] = useState<'credentials' | 'google_reset' | 'email_recovery'>(
+    'credentials'
+  );
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -75,6 +78,15 @@ export function AuthGate({
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [infoMsg, setInfoMsg] = useState('');
+
+  // GAS First-Time Admin Setup & Email Recovery states
+  const [setupUsername, setSetupUsername] = useState(initialAdminUsername || 'scc@gmail.com');
+  const [setupCode, setSetupCode] = useState('');
+  const [setupCodeSent, setSetupCodeSent] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify' | 'reset'>('request');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryToken, setRecoveryToken] = useState('');
 
   const switchTab = (nextTab: 'signin' | 'change_password') => {
     setAuthTab(nextTab);
@@ -84,17 +96,115 @@ export function AuthGate({
     setConfirmPassword('');
     setShowPassword(false);
     setShowNewPassword(false);
+    setRecoveryStep('request');
+    setRecoveryCode('');
+    setRecoveryToken('');
     setError('');
+    setInfoMsg('');
   };
 
-  const switchChangeMode = (nextMode: 'credentials' | 'google_reset') => {
+  const switchChangeMode = (nextMode: 'credentials' | 'google_reset' | 'email_recovery') => {
     setChangeMode(nextMode);
     setPassword('');
     setNewPassword('');
     setConfirmPassword('');
     setShowPassword(false);
     setShowNewPassword(false);
+    setRecoveryStep('request');
+    setRecoveryCode('');
+    setRecoveryToken('');
     setError('');
+    setInfoMsg('');
+  };
+
+  const handleRequestGasSetupCode = async () => {
+    setError('');
+    setInfoMsg('');
+    setSubmitting(true);
+    try {
+      const res = await api.requestInitialSetupCode();
+      setSetupCodeSent(true);
+      setInfoMsg(res.message || `6-digit setup code sent to ${res.sentTo}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send verification code.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCompleteGasSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setInfoMsg('');
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirmation do not match.');
+      return;
+    }
+    if (!setupCode.trim()) {
+      setError('Enter the 6-digit verification code sent to your owner email.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api.completeInitialSetup({
+        code: setupCode.trim(),
+        username: setupUsername.trim().toLowerCase(),
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      });
+      setAuthToken(res.token);
+      onAuthenticated(res.user, false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Admin setup failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGasRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setInfoMsg('');
+    setSubmitting(true);
+    try {
+      if (recoveryStep === 'request') {
+        const res = await api.requestRecoveryCode({ username: username.trim().toLowerCase() });
+        setRecoveryStep('verify');
+        setInfoMsg(
+          res.message ||
+            `If the account matches, a 6-digit recovery code was sent to ${ownerEmailHint || 'your owner email'}.`
+        );
+      } else if (recoveryStep === 'verify') {
+        const res = await api.verifyRecoveryCode({
+          username: username.trim().toLowerCase(),
+          code: recoveryCode.trim(),
+        });
+        setRecoveryToken(res.reset_token);
+        setRecoveryStep('reset');
+        setInfoMsg('Code verified. Enter your new admin password below.');
+      } else {
+        if (newPassword.length < 6) throw new Error('New password must be at least 6 characters.');
+        if (newPassword !== confirmPassword) {
+          throw new Error('New password and confirmation do not match.');
+        }
+        const res = await api.completeRecovery({
+          username: username.trim().toLowerCase(),
+          reset_token: recoveryToken,
+          new_password: newPassword,
+          confirm_password: confirmPassword,
+        });
+        switchTab('signin');
+        setInfoMsg(res.message || 'Admin password reset. Sign in with your new password.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Password recovery failed.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleGoogleAdminSignIn = async () => {
@@ -149,6 +259,7 @@ export function AuthGate({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfoMsg('');
     setSubmitting(true);
     try {
       if (authTab === 'change_password') {
@@ -185,7 +296,133 @@ export function AuthGate({
     }
   };
 
-  const formKey = authTab === 'signin' ? 'signin' : `change-${changeMode}`;
+  const formKey = authTab === 'signin' ? 'signin' : `change-${changeMode}-${recoveryStep}`;
+
+  if (inGasRuntime && needsAdminSetup) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 sm:p-8 shadow-sm">
+          <BrandLogo
+            logoDataUrl={companyLogoDataUrl}
+            variant="light"
+            subtitle="Operations, Orders & Accounts"
+          />
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <h1 className="text-xl font-bold text-[#0B1F3A]">First-Time Admin Account Setup</h1>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              Verify ownership with a 6-digit code sent to{' '}
+              <strong className="font-mono text-[#0B1F3A]">
+                {ownerEmailHint || 'sunvilozltd@gmail.com'}
+              </strong>{' '}
+              to initialize your private Admin login. Setup disables permanently once saved.
+            </p>
+          </div>
+
+          {infoMsg && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-medium text-emerald-800">
+              {infoMsg}
+            </div>
+          )}
+          {error && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleCompleteGasSetup} className="mt-4 space-y-3.5">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-[#0B1F3A]">
+                Admin Username / Email *
+              </label>
+              <input
+                type="text"
+                required
+                value={setupUsername}
+                onChange={(e) => setSetupUsername(e.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-300 px-3 font-mono text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-[#0B1F3A]">
+                New Admin Password (min 6 characters) *
+              </label>
+              <input
+                type={showNewPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Choose a strong admin password"
+                className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-[#0B1F3A]">
+                Confirm Password *
+              </label>
+              <input
+                type={showNewPassword ? 'text' : 'password'}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter admin password"
+                className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+              />
+            </div>
+
+            <div className="rounded-lg border border-teal-200 bg-teal-50/70 p-3 space-y-2">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void handleRequestGasSetupCode()}
+                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[#0B1F3A] px-3 text-xs font-semibold text-white hover:bg-[#132f55] disabled:opacity-50"
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {setupCodeSent
+                  ? 'Resend 6-Digit Verification Code'
+                  : `Send Verification Code to ${ownerEmailHint || 'sunvilozltd@gmail.com'}`}
+              </button>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-[#0B1F3A]">
+                  6-Digit Email Verification Code *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  value={setupCode}
+                  onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code"
+                  className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-mono text-sm tracking-widest"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {submitting ? 'Completing Setup...' : 'Save Admin Credentials & Sign In'}
+            </button>
+          </form>
+
+          <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
+            Alternatively, the owner can run{' '}
+            <code className="font-mono text-slate-600">setupInitialAdmin(&apos;your-password&apos;)</code>{' '}
+            once from the Apps Script Editor and refresh this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (adminSetupLocked || needsAdminSetup) {
     return (
@@ -203,13 +440,14 @@ export function AuthGate({
               Admin Account Setup Locked
             </div>
             <p className="mt-2 text-xs leading-relaxed">
-              Public first-time setup is permanently disabled to protect this workspace. To
-              initialize the fixed initial admin account (
-              <strong className="font-mono">{initialAdminUsername}</strong>):
+              Public first-time setup is disabled to protect this workspace. To initialize the
+              initial admin account (<strong className="font-mono">{initialAdminUsername}</strong>):
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-amber-900">
               <li>
-                <strong>Apps Script Backend:</strong> Open your owner Apps Script project and run{' '}
+                <strong>Google Apps Script Web App:</strong> Deploy the 8 files in{' '}
+                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-semibold">gas/</code>{' '}
+                and either complete email-verified setup on first open or run{' '}
                 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-semibold">
                   setupInitialAdmin(&apos;your-password&apos;)
                 </code>{' '}
@@ -220,11 +458,7 @@ export function AuthGate({
                 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-semibold">
                   ADMIN_PASSWORD
                 </code>{' '}
-                (minimum 6 characters) or{' '}
-                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono font-semibold">
-                  APPS_SCRIPT_WEBAPP_URL
-                </code>{' '}
-                in environment settings and reload.
+                (minimum 6 characters) in environment settings and reload.
               </li>
             </ul>
             <p className="mt-2 text-xs leading-relaxed text-amber-900">
@@ -303,53 +537,67 @@ export function AuthGate({
           </div>
         )}
 
-        {!needsAdminSetup && authTab === 'change_password' && canUseVerifiedGoogleOwnerReset && (
-          <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <button
-              type="button"
-              onClick={() => switchChangeMode('credentials')}
-              className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                changeMode === 'credentials'
-                  ? 'bg-white text-[#0B1F3A] shadow-2xs'
-                  : 'text-slate-600 hover:text-[#0B1F3A]'
-              }`}
-            >
-              Use Current Password
-            </button>
-            <button
-              type="button"
-              onClick={() => switchChangeMode('google_reset')}
-              className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                changeMode === 'google_reset'
-                  ? 'bg-white text-teal-800 shadow-2xs'
-                  : 'text-slate-600 hover:text-[#0B1F3A]'
-              }`}
-            >
-              Forgot Admin Password?
-            </button>
+        {!needsAdminSetup &&
+          authTab === 'change_password' &&
+          (canUseVerifiedGoogleOwnerReset || inGasRuntime) && (
+            <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => switchChangeMode('credentials')}
+                className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  changeMode === 'credentials'
+                    ? 'bg-white text-[#0B1F3A] shadow-2xs'
+                    : 'text-slate-600 hover:text-[#0B1F3A]'
+                }`}
+              >
+                Use Current Password
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  switchChangeMode(inGasRuntime ? 'email_recovery' : 'google_reset')
+                }
+                className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  changeMode === 'google_reset' || changeMode === 'email_recovery'
+                    ? 'bg-white text-teal-800 shadow-2xs'
+                    : 'text-slate-600 hover:text-[#0B1F3A]'
+                }`}
+              >
+                Forgot Admin Password?
+              </button>
+            </div>
+          )}
+
+        {infoMsg && (
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800">
+            {infoMsg}
           </div>
         )}
 
         {error && (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
             <div>{error}</div>
-            {!needsAdminSetup && canUseVerifiedGoogleOwnerReset && changeMode !== 'google_reset' && (
-              <div className="mt-2 border-t border-red-200 pt-2 text-xs font-normal text-red-800">
-                Forgot your Admin password?{' '}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthTab('change_password');
-                    switchChangeMode('google_reset');
-                  }}
-                  className="font-semibold underline hover:text-red-950"
-                >
-                  Reset Admin password with Primary Google Owner ({ownerEmailHint})
-                </button>
-                .
-              </div>
-            )}
-            {!needsAdminSetup && !canUseVerifiedGoogleOwnerReset && (
+            {!needsAdminSetup &&
+              (canUseVerifiedGoogleOwnerReset || inGasRuntime) &&
+              changeMode === 'credentials' && (
+                <div className="mt-2 border-t border-red-200 pt-2 text-xs font-normal text-red-800">
+                  Forgot your Admin password?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthTab('change_password');
+                      switchChangeMode(inGasRuntime ? 'email_recovery' : 'google_reset');
+                    }}
+                    className="font-semibold underline hover:text-red-950"
+                  >
+                    {inGasRuntime
+                      ? `Recover Admin password via 6-digit email code (${ownerEmailHint || 'sunvilozltd@gmail.com'})`
+                      : `Reset Admin password with Primary Google Owner (${ownerEmailHint})`}
+                  </button>
+                  .
+                </div>
+              )}
+            {!needsAdminSetup && !canUseVerifiedGoogleOwnerReset && !inGasRuntime && (
               <div className="mt-2 border-t border-red-200 pt-2 text-xs font-normal text-red-800">
                 Forgot your Admin password? The workspace owner can reset it safely without touching
                 business data by running{' '}
@@ -361,7 +609,102 @@ export function AuthGate({
           </div>
         )}
 
-        {!needsAdminSetup && authTab === 'change_password' && changeMode === 'google_reset' ? (
+        {!needsAdminSetup && authTab === 'change_password' && changeMode === 'email_recovery' ? (
+          <form
+            key={formKey}
+            onSubmit={handleGasRecoverySubmit}
+            autoComplete="off"
+            className="mt-5 space-y-4"
+          >
+            <div className="rounded-lg border border-teal-200 bg-teal-50/70 px-3.5 py-2.5 text-xs text-teal-900">
+              A 10-minute one-time recovery code will be sent only to the owner email (
+              <strong className="font-mono">{ownerEmailHint || 'sunvilozltd@gmail.com'}</strong>).
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
+                Admin Username *
+              </label>
+              <input
+                type="text"
+                required
+                disabled={recoveryStep !== 'request'}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. scc@gmail.com"
+                className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 font-mono text-sm text-[#0B1F3A] disabled:bg-slate-100"
+              />
+            </div>
+
+            {recoveryStep === 'verify' && (
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
+                  6-Digit Email Recovery Code *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  value={recoveryCode}
+                  onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code"
+                  className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 font-mono text-sm tracking-widest text-[#0B1F3A]"
+                />
+              </div>
+            )}
+
+            {recoveryStep === 'reset' && (
+              <>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
+                    New Admin Password (min 6 characters) *
+                  </label>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new admin password"
+                    className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 text-sm text-[#0B1F3A]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-[#0B1F3A]">
+                    Confirm New Password *
+                  </label>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new admin password"
+                    className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 text-sm text-[#0B1F3A]"
+                  />
+                </div>
+              </>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-teal-700 disabled:opacity-60"
+            >
+              <Mail className="h-4 w-4" />
+              {submitting
+                ? 'Please wait...'
+                : recoveryStep === 'request'
+                ? 'Send Recovery Code'
+                : recoveryStep === 'verify'
+                ? 'Verify Recovery Code'
+                : 'Reset Admin Password'}
+            </button>
+          </form>
+        ) : !needsAdminSetup && authTab === 'change_password' && changeMode === 'google_reset' ? (
           <form
             key={formKey}
             onSubmit={handleGoogleAdminPasswordReset}
@@ -617,7 +960,7 @@ export function AuthGate({
             using their assigned username and password.
           </p>
           <div className="pt-2 flex flex-wrap items-center gap-2">
-            <AppsScriptSetupHelper variant="primary" />
+            {!inGasRuntime && <AppsScriptSetupHelper variant="primary" />}
             <PWAInstallButton variant="header" />
           </div>
         </div>

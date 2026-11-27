@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   UserCheck,
 } from 'lucide-react';
-import { api, setAuthToken } from '../services/apiClient';
+import { api, isAppsScriptRuntime, setAuthToken } from '../services/apiClient';
 import {
   AppSettings,
   AuthUser,
@@ -371,34 +371,49 @@ export function SettingsView({
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-700">
-                  Primary Google Apps Script Web App URL
-                </label>
-                <input
-                  type="url"
-                  value={webappUrl}
-                  onChange={(e) => setWebappUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
-                />
-              </div>
+              {isAppsScriptRuntime() ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 flex flex-col justify-center">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                    Connected Natively via Google Apps Script
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-emerald-800">
+                    Business records save directly to your private Google Sheet and PDFs/backups
+                    archive directly to your private Google Drive — no backend URL required.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-semibold text-slate-700">
+                    Primary Google Apps Script Web App URL (Local Preview Only)
+                  </label>
+                  <input
+                    type="url"
+                    value={webappUrl}
+                    onChange={(e) => setWebappUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                  />
+                </div>
+              )}
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-700">
-                Primary Sync Shared Secret (Leave blank to keep existing)
-              </label>
-              <input
-                type="password"
-                value={syncSecret}
-                onChange={(e) => setSyncSecret(e.target.value)}
-                placeholder={
-                  settings.google_sync_configured ? '•••••••• (Configured)' : 'Enter secret'
-                }
-                className="mt-1 max-w-md w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
+            {!isAppsScriptRuntime() && (
+              <div>
+                <label className="text-xs font-semibold text-slate-700">
+                  Primary Sync Shared Secret (Leave blank to keep existing)
+                </label>
+                <input
+                  type="password"
+                  value={syncSecret}
+                  onChange={(e) => setSyncSecret(e.target.value)}
+                  placeholder={
+                    settings.google_sync_configured ? '•••••••• (Configured)' : 'Enter secret'
+                  }
+                  className="mt-1 max-w-md w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 pt-2">
               <button
@@ -418,7 +433,7 @@ export function SettingsView({
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${busyAction === 'sync' ? 'animate-spin' : ''}`}
                 />
-                Sync Primary Google Drive
+                {isAppsScriptRuntime() ? 'Save Drive Snapshot Now' : 'Sync Primary Google Drive'}
               </button>
               <button
                 type="button"

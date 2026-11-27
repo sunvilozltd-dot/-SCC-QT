@@ -46,10 +46,43 @@ import {
   updatePendingMutationFailure,
 } from './offlineSyncQueue';
 
+import { buildClientReportXlsx } from '../utils/clientExcelExport';
+
 // Session token held strictly in JS memory (never localStorage/sessionStorage)
 let authTokenInMemory = '';
 let onSessionRevokedCallback: ((reason: string) => void) | null = null;
 let onBusinessDataMutatedCallback: (() => void) | null = null;
+let latestBootstrapCache: AdminBootstrapPayload | null = null;
+
+interface GasApiResponse<T = unknown> {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  data?: T;
+}
+
+interface GoogleScriptRunner {
+  withSuccessHandler: (cb: (res: GasApiResponse<unknown>) => void) => GoogleScriptRunner;
+  withFailureHandler: (cb: (err: unknown) => void) => GoogleScriptRunner;
+  apiDispatch: (req: {
+    action: string;
+    token: string;
+    request_id: string;
+    payload: Record<string, unknown>;
+  }) => void;
+}
+
+export function isAppsScriptRuntime(): boolean {
+  if (typeof window === 'undefined') return false;
+  const g = (window as unknown as { google?: { script?: { run?: unknown } } }).google;
+  return Boolean(g && g.script && g.script.run);
+}
+
+function getGasRunner(): GoogleScriptRunner | null {
+  if (typeof window === 'undefined') return null;
+  const g = (window as unknown as { google?: { script?: { run?: GoogleScriptRunner } } }).google;
+  return g?.script?.run || null;
+}
 
 export function setAuthToken(token: string) {
   authTokenInMemory = token;
@@ -57,6 +90,7 @@ export function setAuthToken(token: string) {
 
 export function clearAuthToken() {
   authTokenInMemory = '';
+  latestBootstrapCache = null;
 }
 
 export function getAuthToken(): string {
@@ -102,7 +136,8 @@ function isNetworkFailureError(err: unknown): boolean {
     msg.includes('failed to fetch') ||
     msg.includes('networkerror') ||
     msg.includes('load failed') ||
-    msg.includes('network request failed')
+    msg.includes('network request failed') ||
+    msg.includes('network')
   );
 }
 
@@ -121,11 +156,285 @@ export class OfflineQueuedError extends Error {
   }
 }
 
+function cacheBootstrapIfPresent(data: unknown, path: string) {
+  if (!data || typeof data !== 'object') return;
+  if (path === '/api/bootstrap' && 'orders' in data && 'settings' in data) {
+    latestBootstrapCache = data as AdminBootstrapPayload;
+  } else if ('bootstrap' in data && (data as { bootstrap?: AdminBootstrapPayload }).bootstrap) {
+    latestBootstrapCache = (data as { bootstrap: AdminBootstrapPayload }).bootstrap;
+  }
+}
+
+/**
+ * Maps every existing REST path + HTTP method to its exact Apps Script apiDispatch action & payload.
+ */
+function mapRestToGas(
+  rawPath: string,
+  method: string,
+  bodyObj: Record<string, unknown>
+): { action: string; payload: Record<string, unknown>; shortCircuit?: unknown } {
+  const m = method.toUpperCase();
+  const [pathname, queryStr = ''] = rawPath.split('?');
+  const params = new URLSearchParams(queryStr);
+  const seg = pathname.replace(/^\/api\//, '').split('/').map((s) => decodeURIComponent(s));
+
+  // Auth & Sessions
+  if (pathname === '/api/auth/status') return { action: 'auth.status', payload: {} };
+  if (pathname === '/api/auth/session/resume') {
+    return { action: '', payload: {}, shortCircuit: { status: 'unauthenticated' } };
+  }
+  if (pathname === '/api/auth/login' && m === 'POST') return { action: 'auth.login', payload: bodyObj };
+  if (pathname === '/api/auth/logout' && m === 'POST') return { action: 'auth.logout', payload: {} };
+  if (pathname === '/api/auth/me') return { action: 'auth.me', payload: {} };
+  if (pathname === '/api/auth/change-password' && m === 'POST') {
+    return { action: 'auth.change_password', payload: bodyObj };
+  }
+  if (pathname === '/api/auth/account/credentials' && m === 'POST') {
+    return { action: 'auth.update_admin_credentials', payload: bodyObj };
+  }
+  if (pathname === '/api/auth/change-password-with-credentials' && m === 'POST') {
+    return { action: 'auth.change_password_with_credentials', payload: bodyObj };
+  }
+  if (pathname === '/api/auth/devices' && m === 'GET') {
+    return { action: 'auth.devices', payload: { deviceId: params.get('deviceId') || '' } };
+  }
+  if (seg[0] === 'auth' && seg[1] === 'sessions' && seg[2] && m === 'DELETE') {
+    return { action: 'auth.revoke_session', payload: { session_id: seg[2] } };
+  }
+
+  // Bootstrap & Supervisor
+  if (pathname === '/api/bootstrap') return { action: 'bootstrap', payload: {} };
+  if (pathname === '/api/supervisor/jobs') return { action: 'supervisor.jobs', payload: {} };
+
+  // Customers & Buildings
+  if (pathname === '/api/customers' && m === 'POST') return { action: 'customers.save', payload: bodyObj };
+  if (seg[0] === 'customers' && seg[1] && m === 'PUT') {
+    return { action: 'customers.save', payload: { ...bodyObj, customer_id: seg[1] } };
+  }
+  if (pathname === '/api/buildings' && m === 'POST') return { action: 'buildings.save', payload: bodyObj };
+  if (seg[0] === 'buildings' && seg[1] && m === 'PUT') {
+    return { action: 'buildings.save', payload: { ...bodyObj, building_id: seg[1] } };
+  }
+  if (seg[0] === 'buildings' && seg[1] && m === 'DELETE') {
+    return { action: 'buildings.delete', payload: { building_id: seg[1] } };
+  }
+
+  // Orders
+  if (pathname === '/api/orders/check-conflicts' && m === 'POST') {
+    return { action: 'orders.check_conflicts', payload: bodyObj };
+  }
+  if (pathname === '/api/orders' && m === 'POST') return { action: 'orders.create', payload: bodyObj };
+  if (seg[0] === 'orders' && seg[1]) {
+    const orderId = seg[1];
+    if (seg.length === 2 && m === 'PUT') return { action: 'orders.update', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'advance' && m === 'PATCH') return { action: 'orders.update_advance', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'status' && m === 'PATCH') return { action: 'orders.status', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'complete' && m === 'POST') return { action: 'orders.complete', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'financials' && m === 'PATCH') return { action: 'orders.correct_financials', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'settlement' && m === 'POST') return { action: 'orders.settlement_confirm', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'settlement-entries' && m === 'POST') return { action: 'orders.settlement_entry', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'followup' && m === 'PATCH') return { action: 'orders.followup_reschedule', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'followup-done' && m === 'PATCH') return { action: 'orders.followup_done', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'complaints' && m === 'POST') return { action: 'complaints.create', payload: { ...bodyObj, order_id: orderId } };
+    if (seg[2] === 'workers' && seg.length === 3 && m === 'PUT') {
+      return { action: 'orders.update_workers', payload: { ...bodyObj, order_id: orderId } };
+    }
+    if (seg[2] === 'workers' && seg[3] && seg[4] === 'mark-paid' && m === 'POST') {
+      return { action: 'workers.mark_paid', payload: { ...bodyObj, order_id: orderId, order_worker_id: seg[3] } };
+    }
+    if (seg[2] === 'workers' && seg[3] && seg[4] === 'payment' && m === 'PATCH') {
+      return { action: 'workers.correct_payment', payload: { ...bodyObj, order_id: orderId, order_worker_id: seg[3] } };
+    }
+  }
+
+  // Complaints
+  if (seg[0] === 'complaints' && seg[1]) {
+    if (seg.length === 2 && m === 'PATCH') return { action: 'complaints.update', payload: { ...bodyObj, complaint_id: seg[1] } };
+    if (seg[2] === 'return-visit' && m === 'POST') return { action: 'complaints.schedule_return_visit', payload: { ...bodyObj, complaint_id: seg[1] } };
+  }
+
+  // Workers
+  if (pathname === '/api/workers' && m === 'POST') return { action: 'workers.save', payload: bodyObj };
+  if (seg[0] === 'workers' && seg[1] && m === 'PATCH') {
+    return { action: 'workers.save', payload: { ...bodyObj, worker_id: seg[1] } };
+  }
+
+  // Quotations & Receipts
+  if (pathname === '/api/quotations' && m === 'POST') return { action: 'quotations.save', payload: bodyObj };
+  if (seg[0] === 'quotations' && seg[1] && seg[2] === 'followup' && m === 'PATCH') {
+    return { action: 'quotations.followup', payload: { ...bodyObj, quotation_id: seg[1] } };
+  }
+  if (seg[0] === 'quotations' && seg[1] && seg[2] === 'convert' && m === 'POST') {
+    return { action: 'quotations.convert', payload: { ...bodyObj, quotation_id: seg[1] } };
+  }
+  if (pathname === '/api/receipts' && m === 'POST') return { action: 'receipts.issue', payload: bodyObj };
+
+  // Leads
+  if (pathname === '/api/leads/check-phone' && m === 'GET') {
+    return {
+      action: 'leads.check_phone',
+      payload: { phone: params.get('phone') || '', excludeLeadId: params.get('excludeLeadId') || '' },
+    };
+  }
+  if (pathname === '/api/leads' && m === 'POST') return { action: 'leads.save', payload: bodyObj };
+  if (seg[0] === 'leads' && seg[1]) {
+    if (seg.length === 2 && m === 'PUT') return { action: 'leads.save', payload: { ...bodyObj, lead_id: seg[1] } };
+    if (seg[2] === 'notes' && m === 'POST') return { action: 'leads.add_note', payload: { ...bodyObj, lead_id: seg[1] } };
+    if (seg[2] === 'followup' && m === 'PATCH') return { action: 'leads.followup_reschedule', payload: { ...bodyObj, lead_id: seg[1] } };
+    if (seg[2] === 'followup-done' && m === 'PATCH') return { action: 'leads.followup_done', payload: { ...bodyObj, lead_id: seg[1] } };
+  }
+
+  // Supervisors
+  if (pathname === '/api/supervisors' && m === 'POST') return { action: 'supervisors.create', payload: bodyObj };
+  if (seg[0] === 'supervisors' && seg[1] && m === 'PATCH') {
+    return { action: 'supervisors.update', payload: { ...bodyObj, id: seg[1] } };
+  }
+
+  // Overhead
+  if (pathname === '/api/overhead' && m === 'POST') return { action: 'overhead.create', payload: bodyObj };
+  if (seg[0] === 'overhead' && seg[1] && m === 'DELETE') {
+    return { action: 'overhead.delete', payload: { expense_id: seg[1] } };
+  }
+
+  // Document Pads, Branding & Issued PDFs
+  if (seg[0] === 'pads' && seg[1]) {
+    if (seg.length === 2 && m === 'POST') return { action: 'pads.save', payload: { ...bodyObj, pad_type: seg[1] } };
+    if (seg[2] === 'fields' && m === 'PATCH') return { action: 'pads.save_fields', payload: { ...bodyObj, pad_type: seg[1] } };
+    if (seg.length === 2 && m === 'DELETE') return { action: 'pads.delete', payload: { pad_type: seg[1] } };
+  }
+  if (pathname === '/api/branding/logo' && m === 'POST') return { action: 'branding.save_logo', payload: bodyObj };
+  if (pathname === '/api/branding/logo' && m === 'DELETE') return { action: 'branding.delete_logo', payload: {} };
+  if (pathname === '/api/issued-pdfs' && m === 'POST') return { action: 'pdfs.archive', payload: bodyObj };
+  if (seg[0] === 'issued-pdfs' && seg[1] && seg[2] && m === 'GET') {
+    return { action: 'pdfs.get', payload: { doc_type: seg[1], doc_id: seg[2] } };
+  }
+
+  // Settings, Reminders, Primary Drive Snapshots & Backup/Restore
+  if (pathname === '/api/settings' && m === 'PATCH') return { action: 'settings.save', payload: bodyObj };
+  if (pathname === '/api/google/sync' && m === 'POST') return { action: 'primary_drive.save_snapshot', payload: {} };
+  if (pathname === '/api/google/test-email' && m === 'POST') return { action: 'reminders.test_email', payload: {} };
+  if (pathname === '/api/reminders/check' && m === 'POST') return { action: 'reminders.check_now', payload: {} };
+  if (pathname === '/api/reminders/verify-after-restore' && m === 'POST') {
+    return { action: 'reminders.verify_after_restore', payload: {} };
+  }
+  if (pathname === '/api/backup' && m === 'GET') {
+    return { action: 'backup.export_payload', payload: { record: params.get('record') === '1' } };
+  }
+  if (pathname === '/api/backup/validate' && m === 'POST') {
+    return { action: 'backup.validate', payload: { backup: bodyObj } };
+  }
+  if (pathname === '/api/backup/record' && m === 'POST') {
+    return { action: 'backup.record_status', payload: bodyObj };
+  }
+  if (pathname === '/api/backup/run-scheduled' && m === 'POST') {
+    return { action: 'backup.run_scheduled_now', payload: {} };
+  }
+  if (pathname === '/api/restore' && m === 'POST') {
+    return { action: 'backup.restore', payload: { backup: bodyObj } };
+  }
+
+  throw new Error(`Unsupported Apps Script route: ${m} ${pathname}`);
+}
+
+export async function callGasDispatch<T>(
+  action: string,
+  payload: Record<string, unknown> = {},
+  requestId = ''
+): Promise<T> {
+  const runner = getGasRunner();
+  if (!runner) {
+    throw new Error('Google Apps Script runtime is not available in this browser tab.');
+  }
+  return new Promise<T>((resolve, reject) => {
+    runner
+      .withSuccessHandler((res: GasApiResponse<unknown>) => {
+        if (!res || typeof res !== 'object') {
+          reject(new Error('Empty response from Google Apps Script backend.'));
+          return;
+        }
+        if (!res.ok) {
+          const errMsg = res.error || 'Apps Script request failed.';
+          const code = String(res.code || '');
+          if (
+            authTokenInMemory &&
+            !action.startsWith('auth.login') &&
+            !action.startsWith('auth.initial_setup') &&
+            !action.startsWith('auth.recovery') &&
+            !action.startsWith('auth.change_password_with_credentials') &&
+            (code === 'AUTH_REQUIRED' ||
+              code === 'SESSION_REVOKED' ||
+              String(errMsg).toLowerCase().includes('deactivated'))
+          ) {
+            authTokenInMemory = '';
+            onSessionRevokedCallback?.(errMsg);
+          }
+          reject(new Error(errMsg));
+          return;
+        }
+        resolve((res.data ?? {}) as T);
+      })
+      .withFailureHandler((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err || 'Google Apps Script error.');
+        reject(new Error(msg));
+      })
+      .apiDispatch({
+        action,
+        token: authTokenInMemory,
+        request_id: requestId,
+        payload,
+      });
+  });
+}
+
 async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const isBizMut = isBusinessMutationRequest(path, method);
   const idemKey =
     options.idempotencyKey || (isBizMut ? createIdempotencyKey('req') : undefined);
+
+  // Production Google Apps Script HTML Service path (zero external server required)
+  if (isAppsScriptRuntime()) {
+    let bodyObj: Record<string, unknown> = {};
+    if (typeof options.body === 'string' && options.body.trim()) {
+      try {
+        bodyObj = JSON.parse(options.body) as Record<string, unknown>;
+      } catch {
+        bodyObj = {};
+      }
+    }
+    const mapped = mapRestToGas(path, method, bodyObj);
+    if (mapped.shortCircuit !== undefined) {
+      return mapped.shortCircuit as T;
+    }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        throw new TypeError('Offline');
+      }
+      const data = await callGasDispatch<T>(mapped.action, mapped.payload, idemKey || '');
+      cacheBootstrapIfPresent(data, path);
+      if (isBizMut) {
+        onBusinessDataMutatedCallback?.();
+      }
+      return data;
+    } catch (err) {
+      if (
+        options.queueOnOfflineLabel &&
+        idemKey &&
+        ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+        isNetworkFailureError(err)
+      ) {
+        enqueuePendingMutation({
+          idempotencyKey: idemKey,
+          method: method as 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+          path,
+          bodyJson: typeof options.body === 'string' ? options.body : '{}',
+          label: options.queueOnOfflineLabel,
+        });
+        throw new OfflineQueuedError(options.queueOnOfflineLabel, idemKey);
+      }
+      throw err instanceof Error ? err : new Error('Apps Script request failed.');
+    }
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -188,6 +497,7 @@ async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Pro
     throw new Error(errMsg);
   }
 
+  cacheBootstrapIfPresent(data, path);
   if (isBizMut) {
     onBusinessDataMutatedCallback?.();
   }
@@ -216,6 +526,22 @@ export async function flushPendingMutations(): Promise<{
 
   for (const item of items) {
     try {
+      if (isAppsScriptRuntime()) {
+        const bodyObj = JSON.parse(item.bodyJson || '{}') as Record<string, unknown>;
+        const mapped = mapRestToGas(item.path, item.method, bodyObj);
+        if (mapped.shortCircuit === undefined) {
+          const data = await callGasDispatch<unknown>(
+            mapped.action,
+            mapped.payload,
+            item.idempotencyKey
+          );
+          cacheBootstrapIfPresent(data, item.path);
+        }
+        removePendingMutation(item.idempotencyKey);
+        syncedCount += 1;
+        continue;
+      }
+
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-Device-Id': getOrCreateDeviceId(),
@@ -270,11 +596,35 @@ export async function flushPendingMutations(): Promise<{
   };
 }
 
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 async function downloadReportBlob(
   reportType: 'monthly_financial' | 'monthly_team' | 'monthly_worker_payments' | 'lead_source',
   filters: Record<string, string>,
   fallbackFileName: string
 ): Promise<string> {
+  if (isAppsScriptRuntime()) {
+    const bootstrap = latestBootstrapCache || (await api.getAdminBootstrap());
+    const { bytes, fileName } = buildClientReportXlsx(bootstrap, reportType, filters);
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    const blob = new Blob([copy.buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const outName = fileName || fallbackFileName;
+    triggerBlobDownload(blob, outName);
+    return outName;
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-Device-Id': getOrCreateDeviceId(),
@@ -297,14 +647,7 @@ async function downloadReportBlob(
   const match = disp.match(/filename="([^"]+)"/);
   const fileName = match ? match[1] : fallbackFileName;
 
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  triggerBlobDownload(blob, fileName);
   return fileName;
 }
 
@@ -1375,5 +1718,98 @@ export const api = {
     }>('/api/restore', {
       method: 'POST',
       body: JSON.stringify(backupJson),
+    }),
+
+  // Google Apps Script native Auth (email-verified first-time setup & password recovery)
+  requestInitialSetupCode: () =>
+    callGasDispatch<{ sentTo: string; expiresInMinutes: number; message: string }>(
+      'auth.initial_setup_request_code',
+      {}
+    ),
+
+  completeInitialSetup: (payload: {
+    code: string;
+    username?: string;
+    new_password: string;
+    confirm_password: string;
+    device_label?: string;
+  }) =>
+    callGasDispatch<{
+      token: string;
+      user: AuthUser;
+      message: string;
+    }>('auth.initial_setup_complete', {
+      ...payload,
+      device_label: payload.device_label || getFriendlyDeviceLabel(),
+    }),
+
+  requestRecoveryCode: (payload: { username: string }) =>
+    callGasDispatch<{ sentTo?: string; expiresInMinutes?: number; message: string }>(
+      'auth.recovery_request_code',
+      payload
+    ),
+
+  verifyRecoveryCode: (payload: { username: string; code: string }) =>
+    callGasDispatch<{ verified: boolean; reset_token: string; message: string }>(
+      'auth.recovery_verify_code',
+      payload
+    ),
+
+  completeRecovery: (payload: {
+    username: string;
+    reset_token: string;
+    new_password: string;
+    confirm_password: string;
+  }) =>
+    callGasDispatch<{ reset: boolean; message: string }>('auth.recovery_complete', payload),
+
+  // Google Apps Script native Primary Drive snapshots & Secondary Drive Bridge
+  listPrimaryDriveGasSnapshots: () =>
+    callGasDispatch<{
+      versions: Array<{
+        id: string;
+        name: string;
+        size: number;
+        modifiedTime: string;
+        revision: number;
+        checksum: string;
+        isLatest: boolean;
+      }>;
+    }>('primary_drive.list_snapshots', {}),
+
+  savePrimaryDriveGasSnapshot: () =>
+    callGasDispatch<{
+      snapshot: { file_id: string; file_name: string; size_bytes: number; created_at: string };
+      bootstrap: AdminBootstrapPayload;
+      message: string;
+    }>('primary_drive.save_snapshot', {}),
+
+  restorePrimaryDriveGasSnapshot: (fileId: string) =>
+    callGasDispatch<{
+      preRestoreRecoveryFile: string;
+      restoredOrders: number;
+      restoredQuotations: number;
+      restoredReceipts: number;
+      restoredLeads: number;
+      restoredPads: number;
+      restoredIssuedPdfs: number;
+      bootstrap: AdminBootstrapPayload;
+      message: string;
+    }>('primary_drive.restore_snapshot', { file_id: fileId }),
+
+  listSecondaryDriveGasBackups: () =>
+    callGasDispatch<{
+      files: Array<{
+        id: string;
+        name: string;
+        size: number;
+        createdTime: string;
+        ownerEmail: string;
+      }>;
+    }>('backup.list_secondary', {}),
+
+  downloadSecondaryDriveGasBackup: (fileId: string) =>
+    callGasDispatch<{ backup: Record<string, unknown> }>('backup.download_secondary', {
+      file_id: fileId,
     }),
 };
