@@ -72,10 +72,32 @@ interface GoogleScriptRunner {
   }) => void;
 }
 
-export function isAppsScriptRuntime(): boolean {
+export function isAppsScriptIframe(): boolean {
   if (typeof window === 'undefined') return false;
   const g = (window as unknown as { google?: { script?: { run?: unknown } } }).google;
   return Boolean(g && g.script && g.script.run);
+}
+
+export function getConfiguredAppsScriptUrl(): string {
+  const raw = String(import.meta.env.VITE_APPS_SCRIPT_URL || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (
+      parsed.protocol === 'https:' &&
+      parsed.hostname === 'script.google.com' &&
+      parsed.pathname.endsWith('/exec')
+    ) {
+      return raw;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+export function isAppsScriptRuntime(): boolean {
+  return isAppsScriptIframe() || Boolean(getConfiguredAppsScriptUrl());
 }
 
 function getGasRunner(): GoogleScriptRunner | null {
@@ -336,54 +358,87 @@ function mapRestToGas(
   throw new Error(`Unsupported Apps Script route: ${m} ${pathname}`);
 }
 
+function handleGasResponse<T>(action: string, res: GasApiResponse<unknown>): T {
+  if (!res || typeof res !== 'object') {
+    throw new Error('Empty response from Google Apps Script backend.');
+  }
+  if (!res.ok) {
+    const errMsg = res.error || 'Apps Script request failed.';
+    const code = String(res.code || '');
+    if (
+      authTokenInMemory &&
+      !action.startsWith('auth.login') &&
+      !action.startsWith('auth.initial_setup') &&
+      !action.startsWith('auth.recovery') &&
+      !action.startsWith('auth.change_password_with_credentials') &&
+      (code === 'AUTH_REQUIRED' ||
+        code === 'SESSION_REVOKED' ||
+        String(errMsg).toLowerCase().includes('deactivated'))
+    ) {
+      authTokenInMemory = '';
+      onSessionRevokedCallback?.(errMsg);
+    }
+    throw new Error(errMsg);
+  }
+  return (res.data ?? {}) as T;
+}
+
 export async function callGasDispatch<T>(
   action: string,
   payload: Record<string, unknown> = {},
   requestId = ''
 ): Promise<T> {
+  const requestEnvelope = {
+    action,
+    token: authTokenInMemory,
+    request_id: requestId,
+    payload,
+  };
+
   const runner = getGasRunner();
-  if (!runner) {
-    throw new Error('Google Apps Script runtime is not available in this browser tab.');
-  }
-  return new Promise<T>((resolve, reject) => {
-    runner
-      .withSuccessHandler((res: GasApiResponse<unknown>) => {
-        if (!res || typeof res !== 'object') {
-          reject(new Error('Empty response from Google Apps Script backend.'));
-          return;
-        }
-        if (!res.ok) {
-          const errMsg = res.error || 'Apps Script request failed.';
-          const code = String(res.code || '');
-          if (
-            authTokenInMemory &&
-            !action.startsWith('auth.login') &&
-            !action.startsWith('auth.initial_setup') &&
-            !action.startsWith('auth.recovery') &&
-            !action.startsWith('auth.change_password_with_credentials') &&
-            (code === 'AUTH_REQUIRED' ||
-              code === 'SESSION_REVOKED' ||
-              String(errMsg).toLowerCase().includes('deactivated'))
-          ) {
-            authTokenInMemory = '';
-            onSessionRevokedCallback?.(errMsg);
+  if (runner) {
+    return new Promise<T>((resolve, reject) => {
+      runner
+        .withSuccessHandler((res: GasApiResponse<unknown>) => {
+          try {
+            resolve(handleGasResponse<T>(action, res));
+          } catch (err) {
+            reject(err);
           }
-          reject(new Error(errMsg));
-          return;
-        }
-        resolve((res.data ?? {}) as T);
-      })
-      .withFailureHandler((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err || 'Google Apps Script error.');
-        reject(new Error(msg));
-      })
-      .apiDispatch({
-        action,
-        token: authTokenInMemory,
-        request_id: requestId,
-        payload,
-      });
+        })
+        .withFailureHandler((err: unknown) => {
+          const msg =
+            err instanceof Error ? err.message : String(err || 'Google Apps Script error.');
+          reject(new Error(msg));
+        })
+        .apiDispatch(requestEnvelope);
+    });
+  }
+
+  const webAppUrl = getConfiguredAppsScriptUrl();
+  if (!webAppUrl) {
+    throw new Error('Google Apps Script backend is not configured for this web deployment.');
+  }
+
+  // CORS-safe simple POST request (text/plain avoids preflight OPTIONS on script.google.com)
+  const response = await fetch(webAppUrl, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify(requestEnvelope),
   });
+  const text = await response.text();
+  let parsed: GasApiResponse<unknown>;
+  try {
+    parsed = JSON.parse(text) as GasApiResponse<unknown>;
+  } catch {
+    throw new Error(
+      'Google Apps Script backend returned an unexpected response. Confirm the Web App is deployed with access set to "Anyone".'
+    );
+  }
+  return handleGasResponse<T>(action, parsed);
 }
 
 async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
@@ -434,6 +489,16 @@ async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Pro
       }
       throw err instanceof Error ? err : new Error('Apps Script request failed.');
     }
+  }
+
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname.endsWith('.github.io') &&
+    !getConfiguredAppsScriptUrl()
+  ) {
+    throw new Error(
+      'GitHub Pages frontend is live, but VITE_APPS_SCRIPT_URL is not set yet. Add your deployed Google Apps Script /exec URL in GitHub Settings → Secrets and variables → Actions → Variables as VITE_APPS_SCRIPT_URL and re-run the Deploy workflow.'
+    );
   }
 
   const headers: Record<string, string> = {

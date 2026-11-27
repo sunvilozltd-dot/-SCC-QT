@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Download, Globe, Laptop, Smartphone, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
-import { isAppsScriptRuntime } from '../services/apiClient';
+import { isAppsScriptIframe } from '../services/apiClient';
 import { AppsScriptSetupHelper } from './AppsScriptSetupHelper';
 
 interface PWAInstallButtonProps {
@@ -17,7 +17,7 @@ export function PWAInstallButton({ variant = 'header', onNotify }: PWAInstallBut
   const { canNativeInstall, isInstalled, isIos, isAndroid, triggerInstall } = usePWAInstall();
   const [modalOpen, setModalOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const inGasRuntime = isAppsScriptRuntime();
+  const inGasRuntime = isAppsScriptIframe();
 
   const handlePrimaryClick = async () => {
     if (canNativeInstall) {

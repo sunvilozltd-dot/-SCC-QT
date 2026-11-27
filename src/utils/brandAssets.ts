@@ -5,14 +5,19 @@ declare global {
 }
 
 /**
- * Resolves brand image paths so they work both on the local/web server
- * (`/assets/sunviloz/...`) and inside Google Apps Script `HtmlService`
- * (where `build-gas-html.ts` embeds data URIs in `window.__SUNVILOZ_INLINE_ASSETS__`).
+ * Resolves brand image paths across all hosting modes:
+ * - Google Apps Script HtmlService: uses data URIs injected into `window.__SUNVILOZ_INLINE_ASSETS__`
+ * - GitHub Pages subpath (`/<repo>/`) or root (`/`): prefixes with `import.meta.env.BASE_URL`
  */
 export function resolveBrandAsset(assetPath: string): string {
   if (typeof window !== 'undefined' && window.__SUNVILOZ_INLINE_ASSETS__) {
     const inlined = window.__SUNVILOZ_INLINE_ASSETS__[assetPath];
     if (inlined) return inlined;
   }
-  return assetPath;
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
+  const normalizedPath = assetPath.startsWith('/') ? assetPath : `/${assetPath}`;
+  if (!base || base === '.') {
+    return `.${normalizedPath}`;
+  }
+  return `${base}${normalizedPath}`;
 }

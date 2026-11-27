@@ -7,8 +7,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   const isGasSingleFile = process.env.GAS_SINGLE_FILE === 'true';
+  const rawBase = (process.env.VITE_BASE_PATH || '/').trim();
+  const webBase = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
   return {
+    base: isGasSingleFile ? './' : webBase,
     plugins: [
       react(),
       tailwindcss(),
@@ -60,7 +63,7 @@ export default defineConfig(() => {
                 type: 'module',
               },
               manifest: {
-                id: '/',
+                id: webBase,
                 name: 'SUNVILOZ Clean Care',
                 short_name: 'SUNVILOZ',
                 description:
@@ -69,23 +72,23 @@ export default defineConfig(() => {
                 background_color: '#F8FAFC',
                 display: 'standalone',
                 orientation: 'portrait',
-                scope: '/',
-                start_url: '/',
+                scope: webBase,
+                start_url: webBase,
                 icons: [
                   {
-                    src: '/pwa-192x192.png',
+                    src: `${webBase}pwa-192x192.png`,
                     sizes: '192x192',
                     type: 'image/png',
                     purpose: 'any',
                   },
                   {
-                    src: '/pwa-512x512.png',
+                    src: `${webBase}pwa-512x512.png`,
                     sizes: '512x512',
                     type: 'image/png',
                     purpose: 'any',
                   },
                   {
-                    src: '/pwa-maskable-512x512.png',
+                    src: `${webBase}pwa-maskable-512x512.png`,
                     sizes: '512x512',
                     type: 'image/png',
                     purpose: 'maskable',
@@ -95,7 +98,7 @@ export default defineConfig(() => {
               workbox: {
                 maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
                 globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-                navigateFallback: '/index.html',
+                navigateFallback: `${webBase}index.html`,
                 navigateFallbackDenylist: [/^\/api\//],
                 runtimeCaching: [
                   {

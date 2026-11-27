@@ -31,6 +31,7 @@ import {
   api,
   clearAuthToken,
   flushPendingMutations,
+  isAppsScriptIframe,
   isAppsScriptRuntime,
   OfflineQueuedError,
   setAuthToken,
@@ -183,9 +184,9 @@ export function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Register PWA Service Worker (when served outside Google Apps Script HTML Service)
+  // Register PWA Service Worker (outside Google Apps Script iframe)
   useEffect(() => {
-    if (isAppsScriptRuntime()) return;
+    if (isAppsScriptIframe()) return;
     try {
       registerSW({
         immediate: true,
